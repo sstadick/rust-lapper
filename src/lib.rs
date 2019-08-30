@@ -41,12 +41,12 @@
 //!            .map(|iv| cmp::min(i + 2, iv.stop) - cmp::max(i, iv.start))
 //!            .sum::<i32>();
 //!    }
-//!    assert_eq!(sim, 3);
+//!    assert_eq!(sim, 4);
 //! ```
 // TODO: Add benchmarks
 use std::cmp::Ordering;
 
-#[derive(Eq, Debug)]
+#[derive(Eq, Debug, Hash)]
 pub struct Interval<T: Eq> {
     pub start: i32,
     pub stop: i32,
@@ -90,7 +90,7 @@ impl<T: Eq> PartialEq for Interval<T> {
 }
 
 impl<T: Eq> Interval<T> {
-    fn overlap(&self, start: i32, stop: i32) -> bool {
+    pub fn overlap(&self, start: i32, stop: i32) -> bool {
         self.start < stop && self.stop > start
     }
 }
@@ -197,17 +197,14 @@ impl<'a, T: Eq> Iterator for IterFind<'a, T> {
     type Item = &'a Interval<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.off >= self.end {
-            None
-        } else {
+        while self.off < self.end {
             let interval = &self.inner.intervals[self.off];
             self.off += 1;
             if interval.overlap(self.start, self.stop) {
-                Some(interval)
-            } else {
-                None
+                return Some(interval);
             }
         }
+        None
     }
 }
 
