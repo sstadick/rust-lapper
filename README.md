@@ -10,7 +10,7 @@
 This is a rust port of Brent Pendersen's
 [nim-lapper](https://github.com/brentp/nim-lapper). It has a few notable
 differences, mostly that the find and seek methods both return
-iterators, so all adptor methods may be used normally.
+iterators, so all adaptor methods may be used normally.
 
 ## Example
 
