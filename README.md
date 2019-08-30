@@ -3,8 +3,9 @@
 
 # rust-lapper
 
-Documentation: https://docs.rs/rust-lapper
-Crates.io: https://crates.io/crates/rust-lapper
+[Documentation](https://docs.rs/rust-lapper)
+
+[Crates.io](https://crates.io/crates/rust-lapper)
 
 This is a rust port of Brent Pendersen's
 [nim-lapper](https://github.com/brentp/nim-lapper). It has a few notable
