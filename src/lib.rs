@@ -159,7 +159,9 @@ impl<T: Eq> Lapper<T> {
     /// be modified and should be reused in the next query. This allows seek to not need to make
     /// the lapper object mutable, and thus use the same lapper accross threads.
     pub fn seek<'a>(&'a self, start: i32, stop: i32, cursor: &mut usize) -> IterFind<'a, T> {
-        if *cursor == 0 || self.intervals[*cursor].start > start {
+        if *cursor == 0 || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
+        //if *cursor == 0 || self.intervals[*cursor].start > start {
+        {
             *cursor = self.lower_bound(start - self.max_len);
         }
 
@@ -287,6 +289,15 @@ mod tests {
         let lapper = Lapper::new(data);
         lapper
     }
+    fn setup_single() -> Lapper<u32> {
+        let data: Vec<Iv> = vec![Iv {
+            start: 10,
+            stop: 35,
+            val: 0,
+        }];
+        let lapper = Lapper::new(data);
+        lapper
+    }
 
     // Test that a query stop that hits an interval start returns no interval
     #[test]
@@ -381,5 +392,20 @@ mod tests {
             vec![&e1, &e2],
             lapper.seek(8, 20, &mut cursor).collect::<Vec<&Iv>>()
         );
+    }
+
+    // Test that it's not possible to induce index out of bounds by pushing the cursor past the end
+    // of the lapper.
+    #[test]
+    fn test_seek_over_len() {
+        let lapper = setup_nonoverlapping();
+        let single = setup_single();
+        let mut cursor: usize = 0;
+
+        for interval in lapper.iter() {
+            for o_interval in single.seek(interval.start, interval.stop, &mut cursor) {
+                println!("{:#?}", o_interval);
+            }
+        }
     }
 }
