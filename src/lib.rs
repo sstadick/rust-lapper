@@ -47,6 +47,8 @@
 use std::cmp::Ordering;
 use std::collections::{VecDeque, HashSet};
 
+/// Represent a range from [start, stop)
+/// Inclusive start, exclusive of stop
 #[derive(Eq, Debug, Hash, Clone)]
 pub struct Interval<T: Eq + Clone> {
     pub start: usize,
@@ -69,6 +71,12 @@ impl<T: Eq + Clone> Interval<T> {
     #[inline]
     pub fn intersect(&self, other: &Interval<T>) -> usize {
         std::cmp::min(self.stop, other.stop).checked_sub(std::cmp::max(self.start, other.start)).unwrap_or(0)
+    }
+
+    /// Check if two intervals overlap
+    #[inline]
+    pub fn overlap(&self, start: usize, stop: usize) -> bool {
+        self.start < stop && self.stop > start
     }
 }
 
@@ -99,11 +107,6 @@ impl<T: Eq + Clone> PartialEq for Interval<T> {
     }
 }
 
-impl<T: Eq + Clone> Interval<T> {
-    pub fn overlap(&self, start: usize, stop: usize) -> bool {
-        self.start < stop && self.stop > start
-    }
-}
 
 impl<T: Eq + Clone> Lapper<T> {
     pub fn new(mut intervals: Vec<Interval<T>>) -> Self {
