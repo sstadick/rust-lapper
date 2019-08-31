@@ -32,37 +32,47 @@
 //!
 //!    assert_eq!(laps.find(6, 11).next(), Some(&Iv{start: 5, stop: 7, val: 0}));
 //!
-//!    let mut sim: i32 = 0;
+//!    let mut sim: usize = 0;
 //!    let mut cursor = 0;
 //!    // Calculate the overlap between the query and the found intervals, sum total overlap
 //!    for i in (0..10).step_by(3) {
 //!        sim += laps
 //!            .seek(i, i + 2, &mut cursor)
 //!            .map(|iv| cmp::min(i + 2, iv.stop) - cmp::max(i, iv.start))
-//!            .sum::<i32>();
+//!            .sum::<usize>();
 //!    }
 //!    assert_eq!(sim, 4);
 //! ```
 // TODO: Add benchmarks
 use std::cmp::Ordering;
+use std::collections::{VecDeque, HashSet};
 
-#[derive(Eq, Debug, Hash)]
-pub struct Interval<T: Eq> {
-    pub start: i32,
-    pub stop: i32,
+#[derive(Eq, Debug, Hash, Clone)]
+pub struct Interval<T: Eq + Clone> {
+    pub start: usize,
+    pub stop: usize,
     pub val: T,
 }
 
 /// Primary object of the library. The public intervals holds all the intervals and can be used for
 /// iterating / pulling values out of the tree.
 #[derive(Debug)]
-pub struct Lapper<T: Eq> {
+pub struct Lapper<T: Eq + Clone> {
     pub intervals: Vec<Interval<T>>,
-    max_len: i32,
+    max_len: usize,
     cursor: usize,
+    cov: Option<usize>,
 }
 
-impl<T: Eq> Ord for Interval<T> {
+impl<T: Eq + Clone> Interval<T> {
+    /// Compute the intsect between two intervals
+    #[inline]
+    pub fn intersect(&self, other: &Interval<T>) -> usize {
+        std::cmp::min(self.stop, other.stop).checked_sub(std::cmp::max(self.start, other.start)).unwrap_or(0)
+    }
+}
+
+impl<T: Eq + Clone> Ord for Interval<T> {
     #[inline]
     fn cmp(&self, other: &Interval<T>) -> Ordering {
         if self.start < other.start {
@@ -75,47 +85,78 @@ impl<T: Eq> Ord for Interval<T> {
     }
 }
 
-impl<T: Eq> PartialOrd for Interval<T> {
+impl<T: Eq + Clone> PartialOrd for Interval<T> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(&other))
     }
 }
 
-impl<T: Eq> PartialEq for Interval<T> {
+impl<T: Eq + Clone> PartialEq for Interval<T> {
     #[inline]
     fn eq(&self, other: &Interval<T>) -> bool {
         self.start == other.start && self.stop == other.stop
     }
 }
 
-impl<T: Eq> Interval<T> {
-    pub fn overlap(&self, start: i32, stop: i32) -> bool {
+impl<T: Eq + Clone> Interval<T> {
+    pub fn overlap(&self, start: usize, stop: usize) -> bool {
         self.start < stop && self.stop > start
     }
 }
 
-impl<T: Eq> Lapper<T> {
+impl<T: Eq + Clone> Lapper<T> {
     pub fn new(mut intervals: Vec<Interval<T>>) -> Self {
         intervals.sort();
         let mut max_len = 0;
         for interval in intervals.iter() {
-            if interval.stop - interval.start > max_len {
-                max_len = interval.stop - interval.start;
+            let i_len = interval.stop.checked_sub(interval.start).unwrap_or(0);
+            if i_len > max_len {
+                max_len = i_len;
             }
         }
         let lapper = Lapper {
             intervals,
             max_len,
             cursor: 0,
+            cov: None
         };
         lapper
     }
 
+    /// Get the number over intervals in Lapper
     pub fn len(&self) -> usize {
         self.intervals.len()
     }
 
+    /// Get the number of positions covered by the intervals in Lapper. This provides immutable
+    /// access if it has already been set, or on the fly calculation.
+    pub fn cov(&self) -> usize {
+        match self.cov {
+            None => self.calculate_coverage(),
+            Some(cov) => cov
+        }
+    }
+
+    /// Get the number fo positions covered by the intervals in Lapper and store it. If you are
+    /// going to be using the coverage, you should set it to avoid calculating it over and over.
+    pub fn set_cov(&mut self) -> usize {
+        let cov = self.calculate_coverage();
+        self.cov = Some(cov);
+        cov
+    }
+
+    fn calculate_coverage(&self) -> usize {
+        let mut set = HashSet::new();
+        for interval in self.intervals.iter() {
+            for i in interval.start .. interval.stop {
+                set.insert(i);
+            }
+        }
+        set.len()
+    }
+
+    /// Return an iterator over the intervals in Lapper
     pub fn iter<'a>(&'a self) -> IterLapper<'a, T> {
         IterLapper {
             inner: self,
@@ -123,7 +164,30 @@ impl<T: Eq> Lapper<T> {
         }
     }
 
-    fn lower_bound(&self, start: i32) -> usize {
+    /// Merge any intervals that overlap with eachother within the Lapper
+    pub fn merge_overlaps(&mut self) {
+        let mut stack: VecDeque<&mut Interval<T>> = VecDeque::new();
+        let mut ivs = self.intervals.iter_mut();
+        if let Some(first) = ivs.next() {
+            stack.push_back(first);
+            for interval in ivs {
+                let mut top = stack.pop_back().unwrap();
+                if top.stop < interval.start {
+                    stack.push_back(top);
+                    stack.push_back(interval);
+                } else if top.stop < interval.stop {
+                    top.stop = interval.stop;
+                    //stack.pop_back();
+                    stack.push_back(top);
+                } else { // they were equal
+                    stack.push_back(top);
+                }
+            }
+            self.intervals = stack.into_iter().map(|x| Interval{start: x.start, stop: x.stop, val: x.val.clone()}).collect();
+        }
+    }
+
+    fn lower_bound(&self, start: usize) -> usize {
         let mut result = 0;
         let mut count = self.intervals.len();
         let mut step: usize;
@@ -143,10 +207,10 @@ impl<T: Eq> Lapper<T> {
     }
 
     /// Find all intervals that overlap start .. stop
-    pub fn find<'a>(&'a self, start: i32, stop: i32) -> IterFind<'a, T> {
+    pub fn find<'a>(&'a self, start: usize, stop: usize) -> IterFind<'a, T> {
         IterFind {
             inner: self,
-            off: self.lower_bound(start - self.max_len),
+            off: self.lower_bound(start.checked_sub(self.max_len).unwrap_or(0)),
             end: self.intervals.len(),
             start,
             stop,
@@ -158,15 +222,15 @@ impl<T: Eq> Lapper<T> {
     /// instead of a binary search. A reference to a cursor must be passed in. This reference will
     /// be modified and should be reused in the next query. This allows seek to not need to make
     /// the lapper object mutable, and thus use the same lapper accross threads.
-    pub fn seek<'a>(&'a self, start: i32, stop: i32, cursor: &mut usize) -> IterFind<'a, T> {
+    pub fn seek<'a>(&'a self, start: usize, stop: usize, cursor: &mut usize) -> IterFind<'a, T> {
         if *cursor == 0 || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
         //if *cursor == 0 || self.intervals[*cursor].start > start {
         {
-            *cursor = self.lower_bound(start - self.max_len);
+            *cursor = self.lower_bound(start.checked_sub(self.max_len).unwrap_or(0));
         }
 
         while *cursor + 1 < self.intervals.len()
-            && self.intervals[*cursor + 1].start < (start - self.max_len)
+            && self.intervals[*cursor + 1].start < start.checked_sub(self.max_len).unwrap_or(0)
         {
             *cursor += 1;
         }
@@ -184,16 +248,16 @@ impl<T: Eq> Lapper<T> {
 /// Find Iterator
 pub struct IterFind<'a, T>
 where
-    T: Eq + 'a,
+    T: Eq + Clone + 'a,
 {
     inner: &'a Lapper<T>,
     off: usize,
     end: usize,
-    start: i32,
-    stop: i32,
+    start: usize,
+    stop: usize,
 }
 
-impl<'a, T: Eq> Iterator for IterFind<'a, T> {
+impl<'a, T: Eq + Clone> Iterator for IterFind<'a, T> {
     type Item = &'a Interval<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -211,13 +275,13 @@ impl<'a, T: Eq> Iterator for IterFind<'a, T> {
 /// Lapper Iterator
 pub struct IterLapper<'a, T>
 where
-    T: Eq + 'a,
+    T: Eq + Clone + 'a,
 {
     inner: &'a Lapper<T>,
     pos: usize,
 }
 
-impl<'a, T: Eq> Iterator for IterLapper<'a, T> {
+impl<'a, T: Eq + Clone> Iterator for IterLapper<'a, T> {
     type Item = &'a Interval<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -230,7 +294,7 @@ impl<'a, T: Eq> Iterator for IterLapper<'a, T> {
     }
 }
 
-impl<T: Eq> IntoIterator for Lapper<T> {
+impl<T: Eq + Clone> IntoIterator for Lapper<T> {
     type Item = Interval<T>;
     type IntoIter = ::std::vec::IntoIter<Self::Item>;
 
@@ -239,7 +303,7 @@ impl<T: Eq> IntoIterator for Lapper<T> {
     }
 }
 
-impl<'a, T: Eq> IntoIterator for &'a Lapper<T> {
+impl<'a, T: Eq + Clone> IntoIterator for &'a Lapper<T> {
     type Item = &'a Interval<T>;
     type IntoIter = std::slice::Iter<'a, Interval<T>>;
 
@@ -248,7 +312,7 @@ impl<'a, T: Eq> IntoIterator for &'a Lapper<T> {
     }
 }
 
-impl<'a, T: Eq> IntoIterator for &'a mut Lapper<T> {
+impl<'a, T: Eq + Clone> IntoIterator for &'a mut Lapper<T> {
     type Item = &'a mut Interval<T>;
     type IntoIter = std::slice::IterMut<'a, Interval<T>>;
 
@@ -283,6 +347,22 @@ mod tests {
                 val: 0,
             })
             .collect();
+        let lapper = Lapper::new(data);
+        lapper
+    }
+    fn setup_badlapper() -> Lapper<u32> {
+        let data: Vec<Iv> = vec![
+            Iv{start: 70, stop: 120, val: 0}, // max_len = 50
+            Iv{start: 10, stop: 15, val: 0},
+            Iv{start: 10, stop: 15, val: 0}, // exact overlap
+            Iv{start: 12, stop: 15, val: 0}, // inner overlap
+            Iv{start: 14, stop: 16, val: 0}, // overlap end
+            Iv{start: 40, stop: 45, val: 0},
+            Iv{start: 50, stop: 55, val: 0},
+            Iv{start: 60, stop: 65, val: 0},
+            Iv{start: 68, stop: 71, val: 0}, // overlap start
+            Iv{start: 70, stop: 75, val: 0},
+        ];
         let lapper = Lapper::new(data);
         lapper
     }
@@ -391,6 +471,58 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_merge_overlaps() {
+        let mut lapper = setup_badlapper();
+        let expected: Vec<&Iv> = vec![
+            &Iv{start: 10, stop: 16, val: 0},
+            &Iv{start: 40, stop: 45, val: 0},
+            &Iv{start: 50, stop: 55, val: 0},
+            &Iv{start: 60, stop: 65, val: 0},
+            &Iv{start: 68, stop: 120, val: 0}, // max_len = 50
+        ];
+        lapper.merge_overlaps();
+        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>())
+        
+    }
+
+    #[test]
+    fn test_lapper_cov() {
+        let mut lapper = setup_badlapper();
+        let before = lapper.cov();
+        lapper.merge_overlaps();
+        let after = lapper.cov();
+        assert_eq!(before, after);
+
+        let mut lapper = setup_nonoverlapping();
+        lapper.set_cov();
+        assert_eq!(lapper.cov(), 50);
+    }
+
+    #[test]
+    fn test_interval_intersects() {
+        let i1 = Iv{start: 70, stop: 120, val: 0}; // max_len = 50
+        let i2 = Iv{start: 10, stop: 15, val: 0};
+        let i3 = Iv{start: 10, stop: 15, val: 0}; // exact overlap
+        let i4 = Iv{start: 12, stop: 15, val: 0}; // inner overlap
+        let i5 = Iv{start: 14, stop: 16, val: 0}; // overlap end
+        let i6 = Iv{start: 40, stop: 50, val: 0};
+        let i7 = Iv{start: 50, stop: 55, val: 0};
+        let i_8 = Iv{start: 60, stop: 65, val: 0};
+        let i9 = Iv{start: 68, stop: 71, val: 0}; // overlap start
+        let i10 = Iv{start: 70, stop: 75, val: 0};
+
+        assert_eq!(i2.intersect(&i3), 5); // exact match
+        assert_eq!(i2.intersect(&i4), 3); // inner intersect
+        assert_eq!(i2.intersect(&i5), 1); // end intersect
+        assert_eq!(i9.intersect(&i10), 1); // start intersect
+        assert_eq!(i7.intersect(&i_8), 0); // no intersect
+        assert_eq!(i6.intersect(&i7), 0); // no intersect stop = start
+        assert_eq!(i1.intersect(&i10), 5); // inner intersect at start
+    }
+
+    // BUG TESTS - these are tests that came from real life
+
     // Test that it's not possible to induce index out of bounds by pushing the cursor past the end
     // of the lapper.
     #[test]
@@ -404,5 +536,14 @@ mod tests {
                 println!("{:#?}", o_interval);
             }
         }
+    }
+
+    // Test that if lower_bound puts us before the first match, we still return a match
+    #[test]
+    fn test_find_over_behind_first_match() {
+        let lapper = setup_badlapper();
+        let e1 = Iv {start: 50, stop: 55, val: 0};
+        let found = lapper.find(50, 55).next();
+        assert_eq!(found, Some(&e1));
     }
 }

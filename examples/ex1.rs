@@ -26,14 +26,14 @@ fn main() {
         })
     );
 
-    let mut sim: i32 = 0;
+    let mut sim: usize = 0;
     let mut cursor = 0;
     // Calculate the overlap between the query and the found intervals, sum total overlap
     for i in (0..10).step_by(3) {
         sim += laps
             .seek(i, i + 2, &mut cursor)
             .map(|iv| cmp::min(i + 2, iv.stop) - cmp::max(i, iv.start))
-            .sum::<i32>();
+            .sum::<usize>();
     }
     assert_eq!(sim, 10);
 }
