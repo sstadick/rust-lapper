@@ -9,6 +9,6 @@ description = "A fast and easy library for interval overlap library"
 documentation = "https://docs.rs/rust-lapper"
 readme = "README.md"
 categories = ["algorithms", "science"]
-keywords = ["interval-tree", "intervaltree", "interval", "bioinformatics", "algorithm", "ranges", "overlap"]
+keywords = ["intervaltree", "interval", "bioinformatics", "algorithm", "overlap"]
 
 [dependencies]
