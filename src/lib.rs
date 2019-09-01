@@ -31,7 +31,9 @@
 //!    let laps = Lapper::new(data);
 //!
 //!    assert_eq!(laps.find(6, 11).next(), Some(&Iv{start: 5, stop: 7, val: 0}));
-//!
+//!    
+//!    // Demonstration of seek function. By passing in the &mut cursor, seek can have thread local
+//!    // cursors going
 //!    let mut sim: usize = 0;
 //!    let mut cursor = 0;
 //!    // Calculate the overlap between the query and the found intervals, sum total overlap
@@ -45,11 +47,11 @@
 //! ```
 // TODO: Add benchmarks
 use std::cmp::Ordering;
-use std::collections::{VecDeque, HashSet};
+use std::collections::{VecDeque};
 
 /// Represent a range from [start, stop)
 /// Inclusive start, exclusive of stop
-#[derive(Eq, Debug, Hash, Clone)]
+#[derive(Eq, Debug, Clone)]
 pub struct Interval<T: Eq + Clone> {
     pub start: usize,
     pub stop: usize,
@@ -64,6 +66,7 @@ pub struct Lapper<T: Eq + Clone> {
     max_len: usize,
     cursor: usize,
     cov: Option<usize>,
+    pub overlaps_merged: bool,
 }
 
 impl<T: Eq + Clone> Interval<T> {
@@ -84,11 +87,11 @@ impl<T: Eq + Clone> Ord for Interval<T> {
     #[inline]
     fn cmp(&self, other: &Interval<T>) -> Ordering {
         if self.start < other.start {
-            return Ordering::Less;
+            Ordering::Less
         } else if other.start < self.start {
-            return Ordering::Greater;
+            Ordering::Greater
         } else {
-            return self.stop.cmp(&other.stop);
+            self.stop.cmp(&other.stop)
         }
     }
 }
@@ -109,6 +112,8 @@ impl<T: Eq + Clone> PartialEq for Interval<T> {
 
 
 impl<T: Eq + Clone> Lapper<T> {
+    /// Create a new instance of Lapper by passing in a vector of Intervals. This vector will
+    /// immediately be sorted by start order. 
     pub fn new(mut intervals: Vec<Interval<T>>) -> Self {
         intervals.sort();
         let mut max_len = 0;
@@ -118,18 +123,23 @@ impl<T: Eq + Clone> Lapper<T> {
                 max_len = i_len;
             }
         }
-        let lapper = Lapper {
+        Lapper {
             intervals,
             max_len,
             cursor: 0,
-            cov: None
-        };
-        lapper
+            cov: None,
+            overlaps_merged: false,
+        }
     }
 
     /// Get the number over intervals in Lapper
     pub fn len(&self) -> usize {
         self.intervals.len()
+    }
+    
+    /// Check if lapper is empty
+    pub fn is_empty(&self) -> bool {
+        self.intervals.is_empty()
     }
 
     /// Get the number of positions covered by the intervals in Lapper. This provides immutable
@@ -149,25 +159,38 @@ impl<T: Eq + Clone> Lapper<T> {
         cov
     }
 
+
+    /// Calculate teh actual coverage behind the scenes.
     fn calculate_coverage(&self) -> usize {
-        let mut set = HashSet::new();
+        let mut moving_interval = Interval{start: 0, stop: 0, val: 0};
+        let mut cov = 0;
+        
         for interval in self.intervals.iter() {
-            for i in interval.start .. interval.stop {
-                set.insert(i);
+            // If it overlaps, embrace, extend, extinguish
+            if moving_interval.overlap(interval.start, interval.stop) {
+                moving_interval.start = std::cmp::min(moving_interval.start, interval.start);
+                moving_interval.stop = std::cmp::max(moving_interval.stop, interval.stop);
+            } else { // add the set and move on
+                cov += moving_interval.stop - moving_interval.start;
+                moving_interval.start = interval.start;
+                moving_interval.stop = interval.stop;
             }
         }
-        set.len()
+        // add in the last bit
+        cov += moving_interval.stop - moving_interval.start;
+        cov
     }
 
     /// Return an iterator over the intervals in Lapper
-    pub fn iter<'a>(&'a self) -> IterLapper<'a, T> {
+    pub fn iter(&self) -> IterLapper<T> {
         IterLapper {
             inner: self,
             pos: 0,
         }
     }
 
-    /// Merge any intervals that overlap with eachother within the Lapper
+    /// Merge any intervals that overlap with eachother within the Lapper. This is an easy way to
+    /// speed up queries.
     pub fn merge_overlaps(&mut self) {
         let mut stack: VecDeque<&mut Interval<T>> = VecDeque::new();
         let mut ivs = self.intervals.iter_mut();
@@ -186,10 +209,13 @@ impl<T: Eq + Clone> Lapper<T> {
                     stack.push_back(top);
                 }
             }
+            self.overlaps_merged = true;
             self.intervals = stack.into_iter().map(|x| Interval{start: x.start, stop: x.stop, val: x.val.clone()}).collect();
         }
     }
 
+    /// Determine the first index that we should start checking for overlaps for via a binary
+    /// search.
     fn lower_bound(&self, start: usize) -> usize {
         let mut result = 0;
         let mut count = self.intervals.len();
@@ -209,8 +235,47 @@ impl<T: Eq + Clone> Lapper<T> {
         result
     }
 
+    /// Find the union and the intersect of two lapper objects.
+    /// Union: The set of positions found in both lappers
+    /// Intersect: The number of positions where both lappers intersect. Note that a position only
+    /// counts one time, multiple Intervals covering the same position don't add up.
+    /// Note that this will induce a merge_overlaps if that hasn't been run already
+    /// WARNING: If both lappers aren't merge_overlaps, then this won't be correct ... for now
+    #[inline]
+    pub fn union_and_intersect(&self, other: &Self) -> (usize, usize) {
+        let mut intersect = 0;
+        let mut cursor: usize = 0;
+
+        if !self.overlaps_merged || !other.overlaps_merged {
+            eprintln!("WARNING: one fo the two lappers hasn't has overlaps merged");
+        }
+        
+        for self_iv in self.iter() {
+            let mut moving_interval = Interval{start: self_iv.start, stop: self_iv.stop, val: 0};
+            for other_iv in other.seek(self_iv.start, self_iv.stop, &mut cursor) {
+                moving_interval.start = std::cmp::max(moving_interval.start, other_iv.start);
+                moving_interval.stop = std::cmp::min(moving_interval.stop, other_iv.stop);
+            }
+            intersect += moving_interval.stop - moving_interval.start;
+        }
+        let union = self.cov() + other.cov() - intersect;
+        (union, intersect)
+    }
+
+    /// Find the intersect of two lapper objects.
+    /// Intersect: The number of positions where both lappers intersect. Note that a position only
+    /// counts one time, multiple Intervals covering the same position don't add up
+    pub fn intersect(&self, other: &Self) -> usize {        
+        self.union_and_intersect(other).1
+    }
+
+    /// Find the union of two lapper objects.
+    pub fn union(&self, other: &Self) -> usize {
+        self.union_and_intersect(other).0
+    }
+
     /// Find all intervals that overlap start .. stop
-    pub fn find<'a>(&'a self, start: usize, stop: usize) -> IterFind<'a, T> {
+    pub fn find(&self, start: usize, stop: usize) -> IterFind<T> {
         IterFind {
             inner: self,
             off: self.lower_bound(start.checked_sub(self.max_len).unwrap_or(0)),
@@ -522,6 +587,35 @@ mod tests {
         assert_eq!(i7.intersect(&i_8), 0); // no intersect
         assert_eq!(i6.intersect(&i7), 0); // no intersect stop = start
         assert_eq!(i1.intersect(&i10), 5); // inner intersect at start
+    }
+
+    #[test]
+    fn test_union_and_intersect() {
+        let data1: Vec<Iv> = vec![
+            Iv{start: 70, stop: 120, val: 0}, // max_len = 50
+            Iv{start: 10, stop: 15, val: 0}, // exact overlap
+            Iv{start: 12, stop: 15, val: 0}, // inner overlap
+            Iv{start: 14, stop: 16, val: 0}, // overlap end
+            Iv{start: 68, stop: 71, val: 0}, // overlap start
+        ];
+        let data2: Vec<Iv> = vec![
+
+            Iv{start: 10, stop: 15, val: 0},
+            Iv{start: 40, stop: 45, val: 0},
+            Iv{start: 50, stop: 55, val: 0},
+            Iv{start: 60, stop: 65, val: 0},
+            Iv{start: 70, stop: 75, val: 0},
+        ];
+        
+        let (mut lapper1, mut lapper2) = (Lapper::new(data1), Lapper::new(data2)) ;
+        lapper1.merge_overlaps();
+        lapper1.set_cov();
+        lapper2.merge_overlaps();
+        lapper2.set_cov();
+
+        let (union, intersect) = lapper1.union_and_intersect(&lapper2);
+        assert_eq!(intersect, 10);
+        assert_eq!(union, 73);
     }
 
     // BUG TESTS - these are tests that came from real life
