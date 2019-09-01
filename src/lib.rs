@@ -248,18 +248,32 @@ impl<T: Eq + Clone> Lapper<T> {
 
         if !self.overlaps_merged || !other.overlaps_merged {
             eprintln!("WARNING: one fo the two lappers hasn't has overlaps merged");
+            let mut intersections: Vec<Interval<bool>> = vec![];
+            for self_iv in self.iter() {
+                for other_iv in other.seek(self_iv.start, self_iv.stop, &mut cursor) {
+                    let start = std::cmp::max(self_iv.start, other_iv.start);
+                    let stop = std::cmp::min(self_iv.stop, other_iv.stop);
+                    intersections.push(Interval{start, stop, val: true});
+                }
+            }
+            let mut temp_lapper = Lapper::new(intersections);
+            temp_lapper.merge_overlaps();
+            temp_lapper.set_cov();
+            let union = self.cov() + other.cov() - temp_lapper.cov();
+            (union, temp_lapper.cov())
+        } else {
+            for self_iv in self.iter() {
+                let mut moving_interval = Interval{start: self_iv.start, stop: self_iv.stop, val: 0};
+                for other_iv in other.seek(self_iv.start, self_iv.stop, &mut cursor) {
+                    moving_interval.start = std::cmp::max(moving_interval.start, other_iv.start);
+                    moving_interval.stop = std::cmp::min(moving_interval.stop, other_iv.stop);
+                }
+                intersect += moving_interval.stop - moving_interval.start;
+            }
+            let union = self.cov() + other.cov() - intersect;
+            (union, intersect)
         }
         
-        for self_iv in self.iter() {
-            let mut moving_interval = Interval{start: self_iv.start, stop: self_iv.stop, val: 0};
-            for other_iv in other.seek(self_iv.start, self_iv.stop, &mut cursor) {
-                moving_interval.start = std::cmp::max(moving_interval.start, other_iv.start);
-                moving_interval.stop = std::cmp::min(moving_interval.stop, other_iv.stop);
-            }
-            intersect += moving_interval.stop - moving_interval.start;
-        }
-        let union = self.cov() + other.cov() - intersect;
-        (union, intersect)
     }
 
     /// Find the intersect of two lapper objects.
@@ -608,11 +622,16 @@ mod tests {
         ];
         
         let (mut lapper1, mut lapper2) = (Lapper::new(data1), Lapper::new(data2)) ;
+        // Should be the same either way it's calculated
+        let (union, intersect) = lapper1.union_and_intersect(&lapper2);
+        assert_eq!(intersect, 10);
+        assert_eq!(union, 73);
         lapper1.merge_overlaps();
         lapper1.set_cov();
         lapper2.merge_overlaps();
         lapper2.set_cov();
 
+        // Should be the same either way it's calculated
         let (union, intersect) = lapper1.union_and_intersect(&lapper2);
         assert_eq!(intersect, 10);
         assert_eq!(union, 73);
