@@ -1,3 +1,11 @@
+## 9/1/19
+- Corrected the intersection_and_union function to work regardless of
+  the comparison direction. It's a little slower now and in need of
+  benchmarking. I think there is a gain to be had if we know that both
+  lappers have had overlaps merged, I'm just now sure how to make it
+  work yet.
+- Next big todo: add benchmarking!
+
 ## 8/31/19
 - Moved a bunch of functionality in, like merge overlaps and detect
   intersects and coverage calculation.
