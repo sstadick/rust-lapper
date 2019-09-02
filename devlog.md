@@ -4,6 +4,8 @@
   benchmarking. I think there is a gain to be had if we know that both
   lappers have had overlaps merged, I'm just now sure how to make it
   work yet.
+- Copy the version of intersect_and_union from chromcomp, it works and
+  is faster
 - Next big todo: add benchmarking!
 
 ## 8/31/19
