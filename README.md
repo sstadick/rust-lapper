@@ -16,28 +16,57 @@ iterators, so all adaptor methods may be used normally.
 
 ```rust
 use rust_lapper::{Interval, Lapper};
-use std::cmp;
 
 type Iv = Interval<u32>;
 fn main() {
     // create some fake data
-    let data: Vec<Iv> = (0..20).step_by(5).map(|x| Iv{start: x, stop: x + 2, val: 0}).collect();
-    println!("{:#?}", data);
+    let data: Vec<Iv> = vec![
+        Iv{start: 70, stop: 120, val: 0}, // max_len = 50
+        Iv{start: 10, stop: 15, val: 0},
+        Iv{start: 10, stop: 15, val: 0}, // exact overlap
+        Iv{start: 12, stop: 15, val: 0}, // inner overlap
+        Iv{start: 14, stop: 16, val: 0}, // overlap end
+        Iv{start: 40, stop: 45, val: 0},
+        Iv{start: 50, stop: 55, val: 0},
+        Iv{start: 60, stop: 65, val: 0},
+        Iv{start: 68, stop: 71, val: 0}, // overlap start
+        Iv{start: 70, stop: 75, val: 0},
+    ];
 
-    // make lapper structure
-    let laps = Lapper::new(data);
+    // Make lapper structure
+    let mut lapper = Lapper::new(data);
+    
+    // Iterator based find to extract all intervals that overlap 6..7
+    // If your queries are coming in start sorted order, use the seek method to retain a cursor for
+    // a big speedup.
+    assert_eq!(
+        lapper.find(11, 15).collect::<Vec<&Iv>>(), vec![
+            &Iv{start: 10, stop: 15, val: 0},
+            &Iv{start: 10, stop: 15, val: 0}, // exact overlap
+            &Iv{start: 12, stop: 15, val: 0}, // inner overlap
+            &Iv{start: 14, stop: 16, val: 0}, // overlap end
+        ]
+    );
 
-    assert_eq!(laps.find(6, 11).next(), Some(&Iv{start: 5, stop: 7, val: 0}));
+    // Merge overlapping regions within the lapper to simlify and speed up queries that only depend
+    // on 'any' overlap and not how many
+    lapper.merge_overlaps();
+    assert_eq!(
+        lapper.find(11, 15).collect::<Vec<&Iv>>(), vec![
+            &Iv{start: 10, stop: 16, val: 0},
+        ]
+    );
 
-    let mut sim: i32 = 0;
-    let mut cursor = 0;
-    // Calculate the overlap between the query and the found intervals, sum total overlap
-    for i in (0..10).step_by(3) {
-        sim += laps
-            .seek(i, i + 2, &mut cursor)
-            .map(|iv| cmp::min(i + 2, iv.stop) - cmp::max(i, iv.start))
-            .sum::<i32>();
-    }
-    assert_eq!(sim, 10);
+    // Get the number of positions covered by the lapper tree:
+    assert_eq!(lapper.cov(), 73);
+
+    // Get the union and intersect of two different lapper trees
+    let data = vec![
+        Iv{start: 5, stop: 15, val: 0},
+        Iv{start: 48, stop: 80, val: 0},
+    ];
+    let (union, intersect) = lapper.union_and_intersect(&Lapper::new(data));
+    assert_eq!(union, 88);
+    assert_eq!(intersect, 27);
 }
 ```
