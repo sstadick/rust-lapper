@@ -1,3 +1,10 @@
+## 9/2/19
+- Corrected the range on the IterFind to properly stop looking once stop
+  has been hit.
+- Added benchmarks for find and seek
+- Sped up the intesection method when we know that overlaps have been
+  merged.
+- Figure out the possible speedup with miss counting!!
 ## 9/1/19
 - Corrected the intersection_and_union function to work regardless of
   the comparison direction. It's a little slower now and in need of
