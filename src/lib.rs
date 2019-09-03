@@ -2,7 +2,7 @@
 //! This module provides a simple data-structure for fast interval searches.
 //! ```text
 //!       0  1  2  3  4  5  6  7  8  9  10 11
-//! (0,10]X  X  X  X  X  X  X  X  
+//! (0,10]X  X  X  X  X  X  X  X  X  X
 //! (2,5]       X  X  X
 //! (3,8]          X  X  X  X  X
 //! (3,8]          X  X  X  X  X
