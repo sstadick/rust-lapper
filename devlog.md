@@ -1,3 +1,8 @@
+## 9/3/19
+- Added a worst case mode to allow for setting max misses and then
+  recalculating the binary search from there. I think that for anything
+  except maybe whole chromosome intervals, it's faster to not use it.
+- Updated docs
 ## 9/2/19
 - Corrected the range on the IterFind to properly stop looking once stop
   has been hit.
@@ -5,6 +10,7 @@
 - Sped up the intesection method when we know that overlaps have been
   merged.
 - Figure out the possible speedup with miss counting!!
+- Fix up docs to include features list / make less block of text
 ## 9/1/19
 - Corrected the intersection_and_union function to work regardless of
   the comparison direction. It's a little slower now and in need of
