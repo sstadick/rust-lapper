@@ -185,6 +185,7 @@ impl<T: Eq + Clone> Lapper<T> {
     }
 
     /// Return an iterator over the intervals in Lapper
+    #[inline]
     pub fn iter(&self) -> IterLapper<T> {
         IterLapper {
             inner: self,
@@ -239,42 +240,60 @@ impl<T: Eq + Clone> Lapper<T> {
         result
     }
 
+    #[inline]
+    fn lower_bound_offset(&self, start: usize, intervals: &[Interval<T>]) -> usize {
+        let mut result = 0;
+        let mut count = intervals.len();
+        let mut step: usize;
+        let mut pos: usize;
+
+        while count != 0 {
+            step = count / 2;
+            pos = result + step;
+            if intervals[pos].start < start {
+                result = pos + 1;
+                count -= step + 1;
+            } else {
+                count = step;
+            }
+        }
+        result
+    }
+
     /// Find the union and the intersect of two lapper objects.
     /// Union: The set of positions found in both lappers
     /// Intersect: The number of positions where both lappers intersect. Note that a position only
     /// counts one time, multiple Intervals covering the same position don't add up.
-    /// TODO: a speedup should be available if merge overlaps has already been run
     #[inline]
     pub fn union_and_intersect(&self, other: &Self) -> (usize, usize) {
         //let mut intersect = 0;
         let mut cursor: usize = 0;
 
-        //if !self.overlaps_merged || !other.overlaps_merged {
-        let mut intersections: Vec<Interval<bool>> = vec![];
-        for self_iv in self.iter() {
-            for other_iv in other.seek(self_iv.start, self_iv.stop, &mut cursor) {
-                let start = std::cmp::max(self_iv.start, other_iv.start);
-                let stop = std::cmp::min(self_iv.stop, other_iv.stop);
-                intersections.push(Interval{start, stop, val: true});
+        if !self.overlaps_merged || !other.overlaps_merged {
+            let mut intersections: Vec<Interval<bool>> = vec![];
+            for self_iv in self.iter() {
+                for other_iv in other.seek(self_iv.start, self_iv.stop, &mut cursor) {
+                    let start = std::cmp::max(self_iv.start, other_iv.start);
+                    let stop = std::cmp::min(self_iv.stop, other_iv.stop);
+                    intersections.push(Interval{start, stop, val: true});
+                }
             }
+            let mut temp_lapper = Lapper::new(intersections);
+            temp_lapper.merge_overlaps();
+            temp_lapper.set_cov();
+            let union = self.cov() + other.cov() - temp_lapper.cov();
+            (union, temp_lapper.cov())
+        } else {
+            let mut intersect = 0;
+            for c1_iv in self.iter() {
+                for c2_iv in other.seek(c1_iv.start, c1_iv.stop, &mut cursor) {
+                    let local_intersect = c1_iv.intersect(c2_iv);
+                    intersect += local_intersect;
+                }
+            }
+            let union = self.cov() + other.cov() - intersect;
+            (union, intersect)
         }
-        let mut temp_lapper = Lapper::new(intersections);
-        temp_lapper.merge_overlaps();
-        temp_lapper.set_cov();
-        let union = self.cov() + other.cov() - temp_lapper.cov();
-        (union, temp_lapper.cov())
-        //} else {
-            //for self_iv in self.iter() {
-                //let mut moving_interval = Interval{start: self_iv.start, stop: self_iv.stop, val: 0};
-                //for other_iv in other.seek(self_iv.start, self_iv.stop, &mut cursor) {
-                    //moving_interval.start = std::cmp::max(moving_interval.start, other_iv.start);
-                    //moving_interval.stop = std::cmp::min(moving_interval.stop, other_iv.stop);
-                //}
-                //intersect += moving_interval.stop - moving_interval.start;
-            //}
-            //let union = self.cov() + other.cov() - intersect;
-            //(union, intersect)
-        //}
         
     }
 
@@ -347,14 +366,27 @@ where
 
 impl<'a, T: Eq + Clone> Iterator for IterFind<'a, T> {
     type Item = &'a Interval<T>;
-
+    // TODO: Figure out what about this causes a small difference when using the speedup
+    // Is it maybe skipping the first iteration on the way? 'miss' 3
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
+        //let mut misses = 0;
         while self.off < self.end {
+            //if misses > 2 {
+                //self.off = self.inner.lower_bound_offset(self.start, &self.inner.intervals[self.off..]) + self.off;
+                //misses = 0;
+            //}
+            //if self.off == self.end {
+                //break;
+            //}
             let interval = &self.inner.intervals[self.off];
             self.off += 1;
             if interval.overlap(self.start, self.stop) {
                 return Some(interval);
+            } else if interval.start >= self.stop {
+                break;
             }
+            //misses += 1;
         }
         None
     }

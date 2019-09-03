@@ -12,3 +12,12 @@ categories = ["algorithms", "science"]
 keywords = ["tree", "interval", "bioinformatics", "ranges", "genomic"]
 
 [dependencies]
+
+[dev-dependencies]
+criterion = "0.3"
+rand = "0.7"
+cpu-time = "0.1.0"
+
+[[bench]]
+name = "lapper_benchmark"
+harness = false
