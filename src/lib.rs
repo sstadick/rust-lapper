@@ -73,6 +73,7 @@
 //!    }
 //!    assert_eq!(sim, 4);
 //! ```
+//#![feature(asm)]
 use std::cmp::Ordering;
 use std::collections::{VecDeque};
 
@@ -254,42 +255,44 @@ impl<T: Eq + Clone> Lapper<T> {
     /// search.
     #[inline]
     fn lower_bound(&self, start: usize) -> usize {
-        let mut result = 0;
-        let mut count = self.intervals.len();
-        let mut step: usize;
-        let mut pos: usize;
-
-        while count != 0 {
-            step = count / 2;
-            pos = result + step;
-            if self.intervals[pos].start < start {
-                result = pos + 1;
-                count -= step + 1;
+        let mut size = self.intervals.len();
+        let mut low = 0;
+        
+        while size > 0 {
+            let half = size / 2;
+            let other_half = size - half;
+            let probe = low + half;
+            let other_low = low + other_half;
+            let v = &self.intervals[probe];
+            size = half;
+            low = if v.start < start {
+                other_low
             } else {
-                count = step;
+                low
             }
         }
-        result
+        low
     }
 
     #[inline]
     fn lower_bound_offset(&self, start: usize, intervals: &[Interval<T>]) -> usize {
-        let mut result = 0;
-        let mut count = intervals.len();
-        let mut step: usize;
-        let mut pos: usize;
-
-        while count != 0 {
-            step = count / 2;
-            pos = result + step;
-            if intervals[pos].start < start {
-                result = pos + 1;
-                count -= step + 1;
+        let mut size = intervals.len();
+        let mut low = 0;
+        
+        while size > 0 {
+            let half = size / 2;
+            let other_half = size - half;
+            let probe = low + half;
+            let other_low = low + other_half;
+            let v = &intervals[probe];
+            size = half;
+            low = if v.start < start {
+                other_low
             } else {
-                count = step;
+                low
             }
         }
-        result
+        low
     }
 
     /// Find the union and the intersect of two lapper objects.
@@ -448,7 +451,7 @@ impl<'a, T: Eq + Clone> Iterator for IterFind<'a, T> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        while self.off < self.end {
+       while self.off < self.inner.intervals.len() {
             let interval = &self.inner.intervals[self.off];
             self.off += 1;
             if interval.overlap(self.start, self.stop) {
@@ -870,7 +873,7 @@ mod tests {
             Iv{start:27959118, stop: 27959171	, val: 0},
             Iv{start:28866309, stop: 33141404	, val: 0},
         ];
-        let mut lapper = Lapper::new(data);
+        let lapper = Lapper::new(data);
 
         let found = lapper.find_skip(28974798, 33141355, 2).collect::<Vec<&Iv>>();
         assert_eq!(found, vec![
