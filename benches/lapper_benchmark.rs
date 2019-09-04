@@ -10,6 +10,8 @@ use rand::prelude::*;
 use rand::Rng;
 use std::time::Duration;
 use cpu_time::ProcessTime;
+use nested_intervals::IntervalSet;
+use std::ops::Range;
 
 type Iv = Interval<bool>;
 
@@ -28,7 +30,7 @@ fn make_random(n: usize, range_max: usize, size_min: usize, size_max: usize) -> 
     result
 }
 
-fn make_interval_set() -> (Vec<Iv>, Vec<Iv>){
+fn make_interval_set() -> (Vec<Iv>, Vec<Iv>, Vec<Range<u32>>, Vec<Range<u32>>){
     //let n = 3_000_000;
     let n = 1_000;
     let chrom_size = 100_000_000;
@@ -36,16 +38,24 @@ fn make_interval_set() -> (Vec<Iv>, Vec<Iv>){
     let max_interval_size = 80000;
     let intervals = make_random(n, chrom_size, min_interval_size, max_interval_size);
     let other_intervals = make_random(n, 10 * chrom_size, 1, 2);
-    (intervals, other_intervals)
+    let nested_intervals = intervals.iter().map(|x| x.start as u32 ..x.stop as u32).collect();
+    let nested_other_intervals = other_intervals.iter().map(|x| x.start as u32 ..x.stop as u32).collect();
+    (intervals, other_intervals, nested_intervals, nested_other_intervals)
 }
 
 pub fn query(c: &mut Criterion) {
-    let (intervals, other_intervals) = make_interval_set();
+    let (intervals, other_intervals, nested_intervals, nested_other_intervals) = make_interval_set();
     let mut bad_intervals = intervals.clone();
     let lapper = Lapper::new(intervals);
     let other_lapper = Lapper::new(other_intervals);
     bad_intervals.push(Iv{start:0, stop: 90_000_000, val: false});
     let  bad_lapper = Lapper::new(bad_intervals);
+
+    let mut bad_nested_intervals = nested_intervals.clone();
+    bad_nested_intervals.push(0..90_000_000);
+    let mut nested_interval_set = IntervalSet::new(&nested_intervals).unwrap();
+    let mut nested_other_interval_set = IntervalSet::new(&nested_other_intervals).unwrap();
+    let mut nested_bad_interval_set = IntervalSet::new(&bad_nested_intervals).unwrap();
 
     //let start = ProcessTime::now();
     //println!("Starting timer");
@@ -57,96 +67,158 @@ pub fn query(c: &mut Criterion) {
     //println!("100% hit rate: {:#?}", cpu_time);
     //println!("Found {}", count);
 
-    c.bench_function("find with 100% hit rate", |b| {
+    let mut comparison_group = c.benchmark_group("nested_intervals vs rust-lapper");
+    comparison_group.bench_function("rust-lapper: find with 100% hit rate", |b| {
         b.iter(|| {
-            let mut count = 0;
             for x in lapper.iter() {
-                count += lapper.find(x.start, x.stop).count();
+                lapper.find(x.start, x.stop).count();
             }
         });
     });
 
-    c.bench_function("find with below 100% hit rate", |b| {
+    comparison_group.bench_function("rust-lapper: find with below 100% hit rate", |b| {
         b.iter(|| {
-            let mut count = 0;
             for x in other_lapper.iter() {
-                count += lapper.find(x.start, x.stop).count();
+                lapper.find(x.start, x.stop).count();
             }
         });
     });
-    c.bench_function("find_skip with 100% hit rate", |b| {
-        b.iter(|| {
-            let mut count = 0;
-            for x in lapper.iter() {
-                count += lapper.find_skip(x.start, x.stop, 50).count();
-            }
-        });
-    });
-
-    c.bench_function("find_skip with below 100% hit rate", |b| {
-        b.iter(|| {
-            let mut count = 0;
-            for x in other_lapper.iter() {
-                count += lapper.find_skip(x.start, x.stop, 10).count();
-            }
-        });
-    });
-
-    c.bench_function("find with 100% hit rate - chromosome spanning interval", |b| {
-        b.iter(|| {
-            let mut count = 0;
-            for x in lapper.iter() {
-                count += bad_lapper.find(x.start, x.stop).count();
-            }
-        });
-    });
-
-    c.bench_function("find_skip below 100% hit rate - chromsome spanning interval", |b| {
-        b.iter(|| {
-            let mut count = 0;
-            for x in other_lapper.iter() {
-                count += bad_lapper.find_skip(x.start, x.stop, 10).count();
-            }
-        });
-    });
-    c.bench_function("seek with 100% hit rate", |b| {
+    comparison_group.bench_function("rust-lapper: seek with 100% hit rate", |b| {
         b.iter(|| {
             let mut cursor = 0;
-            let mut count = 0;
             for x in lapper.iter() {
-                count += lapper.seek(x.start, x.stop, &mut cursor).count();
+                lapper.seek(x.start, x.stop, &mut cursor).count();
+            }
+        });
+    });
+    comparison_group.bench_function("rust-lapper: seek with below 100% hit rate", |b| {
+        b.iter(|| {
+            let mut cursor = 0;
+            for x in other_lapper.iter() {
+                lapper.seek(x.start, x.stop, &mut cursor).count();
+            }
+        });
+    });
+    comparison_group.bench_function("rust-lapper: find with 100% hit rate - chromosome spanning interval", |b| {
+        b.iter(|| {
+            for x in bad_lapper.iter() {
+                bad_lapper.find(x.start, x.stop).count();
+            }
+        });
+    });
+    comparison_group.bench_function("rust-lapper: seek with 100% hit rate - chromosome spanning interval", |b| {
+        b.iter(|| {
+            let mut cursor = 0;
+            for x in bad_lapper.iter() {
+                bad_lapper.seek(x.start, x.stop, &mut cursor).count();
+            }
+        });
+    });
+    comparison_group.bench_function("nested_intervals: query_overlapping with 100% hit rate", |b| {
+        b.iter(|| {
+            for x in nested_intervals.iter() {
+                nested_interval_set.query_overlapping(x).iter().count();
+            }
+        });
+    });
+    comparison_group.bench_function("nested_intervals: query_overlapping with below 100% hit rate", |b| {
+        b.iter(|| {
+            for x in nested_other_intervals.iter() {
+                nested_interval_set.query_overlapping(x).iter().count();
+            }
+        });
+    });
+    comparison_group.bench_function("nested_intervals: query_overlapping with below 100% hit rate - chromosome spanning interval", |b| {
+        b.iter(|| {
+            for x in nested_other_intervals.iter() {
+                nested_bad_interval_set.query_overlapping(x).iter().count();
+            }
+        });
+    });
+    comparison_group.finish();
+
+    let mut group = c.benchmark_group("Lapper find overlaps");
+    group.bench_function("find with 100% hit rate", |b| {
+        b.iter(|| {
+            for x in lapper.iter() {
+                lapper.find(x.start, x.stop).count();
             }
         });
     });
 
-    c.bench_function("seek with below 100% hit rate", |b| {
+    group.bench_function("find with below 100% hit rate", |b| {
         b.iter(|| {
-            let mut cursor = 0;
-            let mut count = 0;
             for x in other_lapper.iter() {
-                count += lapper.seek(x.start, x.stop, &mut cursor).count();
+                lapper.find(x.start, x.stop).count();
             }
         });
     });
-    c.bench_function("seek_skip with 100% hit rate", |b| {
+    group.bench_function("find_skip with 100% hit rate", |b| {
         b.iter(|| {
-            let mut cursor = 0;
-            let mut count = 0;
             for x in lapper.iter() {
-                count += lapper.seek_skip(x.start, x.stop, &mut cursor, 10).count();
+                lapper.find_skip(x.start, x.stop, 50).count();
             }
         });
     });
 
-    c.bench_function("seek_skip with below 100% hit rate", |b| {
+    group.bench_function("find_skip with below 100% hit rate", |b| {
         b.iter(|| {
-            let mut cursor = 0;
-            let mut count = 0;
             for x in other_lapper.iter() {
-                count += lapper.seek_skip(x.start, x.stop, &mut cursor, 10).count();
+                lapper.find_skip(x.start, x.stop, 10).count();
             }
         });
     });
+
+    group.bench_function("find with 100% hit rate - chromosome spanning interval", |b| {
+        b.iter(|| {
+            for x in lapper.iter() {
+                bad_lapper.find(x.start, x.stop).count();
+            }
+        });
+    });
+
+    group.bench_function("find_skip below 100% hit rate - chromsome spanning interval", |b| {
+        b.iter(|| {
+            for x in other_lapper.iter() {
+                bad_lapper.find_skip(x.start, x.stop, 10).count();
+            }
+        });
+    });
+    group.bench_function("seek with 100% hit rate", |b| {
+        b.iter(|| {
+            let mut cursor = 0;
+            for x in lapper.iter() {
+                lapper.seek(x.start, x.stop, &mut cursor).count();
+            }
+        });
+    });
+
+    group.bench_function("seek with below 100% hit rate", |b| {
+        b.iter(|| {
+            let mut cursor = 0;
+            for x in other_lapper.iter() {
+                lapper.seek(x.start, x.stop, &mut cursor).count();
+            }
+        });
+    });
+    group.bench_function("seek_skip with 100% hit rate", |b| {
+        b.iter(|| {
+            let mut cursor = 0;
+            for x in lapper.iter() {
+                lapper.seek_skip(x.start, x.stop, &mut cursor, 10).count();
+            }
+        });
+    });
+
+    group.bench_function("seek_skip with below 100% hit rate", |b| {
+        b.iter(|| {
+            let mut cursor = 0;
+            for x in other_lapper.iter() {
+                lapper.seek_skip(x.start, x.stop, &mut cursor, 10).count();
+            }
+        });
+    });
+    group.finish();
 }
 
 
