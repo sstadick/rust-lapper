@@ -273,27 +273,6 @@ impl<T: Eq + Clone> Lapper<T> {
         low
     }
 
-    #[inline]
-    fn lower_bound_offset(&self, start: usize, intervals: &[Interval<T>]) -> usize {
-        let mut size = intervals.len();
-        let mut low = 0;
-        
-        while size > 0 {
-            let half = size / 2;
-            let other_half = size - half;
-            let probe = low + half;
-            let other_low = low + other_half;
-            let v = &intervals[probe];
-            size = half;
-            low = if v.start < start {
-                other_low
-            } else {
-                low
-            }
-        }
-        low
-    }
-
     /// Find the union and the intersect of two lapper objects.
     /// Union: The set of positions found in both lappers
     /// Intersect: The number of positions where both lappers intersect. Note that a position only
