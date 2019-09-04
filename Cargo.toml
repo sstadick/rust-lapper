@@ -18,6 +18,7 @@ criterion = "0.3"
 rand = "0.7"
 cpu-time = "0.1.0"
 nested_intervals = {path = "../nested_intervals"}
+bio = "0.28.2"
 
 [[bench]]
 name = "lapper_benchmark"

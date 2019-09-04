@@ -12,6 +12,7 @@ use std::time::Duration;
 use cpu_time::ProcessTime;
 use nested_intervals::IntervalSet;
 use std::ops::Range;
+use bio::data_structures::interval_tree::{IntervalTree};
 
 type Iv = Interval<bool>;
 
@@ -57,6 +58,14 @@ pub fn query(c: &mut Criterion) {
     let mut nested_other_interval_set = IntervalSet::new(&nested_other_intervals).unwrap();
     let mut nested_bad_interval_set = IntervalSet::new(&bad_nested_intervals).unwrap();
 
+    let mut bio_interval_tree = IntervalTree::new();
+    nested_intervals.iter().for_each(|x| bio_interval_tree.insert(x, x.start));
+    let mut bio_other_interval_tree = IntervalTree::new();
+    nested_other_intervals.iter().for_each(|x| bio_other_interval_tree.insert(x, x.start));
+    let mut bio_bad_interval_tree = IntervalTree::new();
+    bad_nested_intervals.iter().for_each(|x| bio_bad_interval_tree.insert(x, x.start));
+
+
     //let start = ProcessTime::now();
     //println!("Starting timer");
     //let mut count = 0;
@@ -67,7 +76,7 @@ pub fn query(c: &mut Criterion) {
     //println!("100% hit rate: {:#?}", cpu_time);
     //println!("Found {}", count);
 
-    let mut comparison_group = c.benchmark_group("nested_intervals vs rust-lapper");
+    let mut comparison_group = c.benchmark_group("Bakeoff");
     comparison_group.bench_function("rust-lapper: find with 100% hit rate", |b| {
         b.iter(|| {
             for x in lapper.iter() {
@@ -99,17 +108,17 @@ pub fn query(c: &mut Criterion) {
             }
         });
     });
-    comparison_group.bench_function("rust-lapper: find with 100% hit rate - chromosome spanning interval", |b| {
+    comparison_group.bench_function("rust-lapper: find with below 100% hit rate - chromosome spanning interval", |b| {
         b.iter(|| {
-            for x in bad_lapper.iter() {
+            for x in other_lapper.iter() {
                 bad_lapper.find(x.start, x.stop).count();
             }
         });
     });
-    comparison_group.bench_function("rust-lapper: seek with 100% hit rate - chromosome spanning interval", |b| {
+    comparison_group.bench_function("rust-lapper: seek with below 100% hit rate - chromosome spanning interval", |b| {
         b.iter(|| {
             let mut cursor = 0;
-            for x in bad_lapper.iter() {
+            for x in other_lapper.iter() {
                 bad_lapper.seek(x.start, x.stop, &mut cursor).count();
             }
         });
@@ -132,6 +141,27 @@ pub fn query(c: &mut Criterion) {
         b.iter(|| {
             for x in nested_other_intervals.iter() {
                 nested_bad_interval_set.query_overlapping(x).iter().count();
+            }
+        });
+    });
+    comparison_group.bench_function("rust-bio: find with 100% hit rate", |b| {
+        b.iter(|| {
+            for x in nested_intervals.iter() {
+                bio_interval_tree.find(x).count();
+            }
+        });
+    });
+    comparison_group.bench_function("rust-bio: find with below 100% hit rate", |b| {
+        b.iter(|| {
+            for x in nested_other_intervals.iter() {
+                bio_interval_tree.find(x).count();
+            }
+        });
+    });
+    comparison_group.bench_function("rust-bio: find with below 100% hit rate - chromosome spanning interval", |b| {
+        b.iter(|| {
+            for x in nested_other_intervals.iter() {
+                bio_bad_interval_tree.find(x).count();
             }
         });
     });
