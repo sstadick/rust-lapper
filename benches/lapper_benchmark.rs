@@ -183,21 +183,6 @@ pub fn query(c: &mut Criterion) {
             }
         });
     });
-    group.bench_function("find_skip with 100% hit rate", |b| {
-        b.iter(|| {
-            for x in lapper.iter() {
-                lapper.find_skip(x.start, x.stop, 50).count();
-            }
-        });
-    });
-
-    group.bench_function("find_skip with below 100% hit rate", |b| {
-        b.iter(|| {
-            for x in other_lapper.iter() {
-                lapper.find_skip(x.start, x.stop, 10).count();
-            }
-        });
-    });
 
     group.bench_function("find with 100% hit rate - chromosome spanning interval", |b| {
         b.iter(|| {
@@ -207,13 +192,6 @@ pub fn query(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("find_skip below 100% hit rate - chromsome spanning interval", |b| {
-        b.iter(|| {
-            for x in other_lapper.iter() {
-                bad_lapper.find_skip(x.start, x.stop, 10).count();
-            }
-        });
-    });
     group.bench_function("seek with 100% hit rate", |b| {
         b.iter(|| {
             let mut cursor = 0;
@@ -228,23 +206,6 @@ pub fn query(c: &mut Criterion) {
             let mut cursor = 0;
             for x in other_lapper.iter() {
                 lapper.seek(x.start, x.stop, &mut cursor).count();
-            }
-        });
-    });
-    group.bench_function("seek_skip with 100% hit rate", |b| {
-        b.iter(|| {
-            let mut cursor = 0;
-            for x in lapper.iter() {
-                lapper.seek_skip(x.start, x.stop, &mut cursor, 10).count();
-            }
-        });
-    });
-
-    group.bench_function("seek_skip with below 100% hit rate", |b| {
-        b.iter(|| {
-            let mut cursor = 0;
-            for x in other_lapper.iter() {
-                lapper.seek_skip(x.start, x.stop, &mut cursor, 10).count();
             }
         });
     });

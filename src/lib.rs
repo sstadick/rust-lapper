@@ -1,5 +1,13 @@
-//! (Docs from nim-lapper, by Brent Pendersen)
 //! This module provides a simple data-structure for fast interval searches.
+//! ## Features
+//! - Extremely fast on most genomic datasets. (3-4x faster than other methods)
+//! - Extremely fast on in order queries. (10x faster than other methods)
+//! - Parallel friendly. Queries are on an immutable structure, even for seek
+//! - Consumer / Adapter paradigm, Iterators are returned and serve as the main API for interacting
+//! with the lapper
+//!
+//! ## Details:
+//!
 //! ```text
 //!       0  1  2  3  4  5  6  7  8  9  10 11
 //! (0,10]X  X  X  X  X  X  X  X  X  X
@@ -14,6 +22,7 @@
 //! Query: (8, 11]
 //! Answer: ((0,10], (5,9], (8,11])
 //! ```
+//!
 //! The main methods are `find` and `seek` where the latter uses a cursor and is very fast for
 //! cases when the queries are sorted. This is another innovation in this library that allows an
 //! additional ~50% speed improvement when consecutive queries are known to be in sort order.
@@ -30,19 +39,9 @@
 //! of this approach is simplicity of implementation and speed. In realistic tests queries returning
 //! the overlapping intervals are 1000 times faster than brute force and queries that merely check 
 //! for the overlaps are > 5000 times faster.
-//! 
-//! On any dataset where that is not the case, It is suggested that you set the `{find,seek}_skip`
-//! methods. This allows the lapper to redo its binary search if no intervals have been found in the
-//! last N intervals seen, as would happen in a scenario with very long intervals. An example of this
-//! can be seen in the diagram above. Without setting max_misses, every interval between the first and
-//! the last one would need to be tested. By seeting max_misses to 2, after (2, 5] and the first (3, 8]
-//! miss, the sublist that hasn't been tested yet would be binar searched to find a better offset, and
-//! skip the other 3 (3, 8], and head strait to (5, 9]. You should benchmark this for your data. It
-//! can cause a best case dataset to be slower, as just iterating over misses is still often
-//! faster than redoing a binary search. 
 //!
-//! A better alternative, if it's possible in your scenario, is to use merge_overlaps first, and
-//! then use the normal find and seek methods. 
+//! When this is not the case, if possible in your scenario, use merge_overlaps first, and then use
+//! find or seek.
 //!
 //! # Examples
 //!
@@ -384,53 +383,6 @@ impl<T: Eq + Clone> Lapper<T> {
             stop,
         }
     }
-    /// Find all intervals that overlap start .. stop.
-    /// This method will redo the binary search for a good offset if no overlap has been seen in the
-    /// last max_misses intervals. This is beneficial for datasets with very long intervals that
-    /// engulf many small intervals.
-    #[inline]
-    pub fn find_skip(&self, start: usize, stop: usize, max_misses: u32) -> IterFindSkip<T> {
-        IterFindSkip {
-            inner: self,
-            off: self.lower_bound(start.checked_sub(self.max_len).unwrap_or(0)),
-            end: self.intervals.len(),
-            start,
-            stop,
-            max_misses,
-        }
-    }
-
-    /// Find all intevals that overlap start .. stop. This method will work when queries
-    /// to this lapper are in sorted (start) order. It uses a linear search from the last query
-    /// instead of a binary search. A reference to a cursor must be passed in. This reference will
-    /// be modified and should be reused in the next query. This allows seek to not need to make
-    /// the lapper object mutable, and thus use the same lapper accross threads. This method will
-    /// redo the binary search for a good offset if no overlap has been seen in the last max_misses
-    /// intervals. This is beneficial for datasets with very long intervals that engulf many small
-    /// intervals.
-    #[inline]
-    pub fn seek_skip<'a>(&'a self, start: usize, stop: usize, cursor: &mut usize, max_misses: u32) -> IterFindSkip<'a, T> {
-        if *cursor == 0 || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
-        //if *cursor == 0 || self.intervals[*cursor].start > start {
-        {
-            *cursor = self.lower_bound(start.checked_sub(self.max_len).unwrap_or(0));
-        }
-
-        while *cursor + 1 < self.intervals.len()
-            && self.intervals[*cursor + 1].start < start.checked_sub(self.max_len).unwrap_or(0)
-        {
-            *cursor += 1;
-        }
-
-        IterFindSkip {
-            inner: self,
-            off: *cursor,
-            end: self.intervals.len(),
-            start,
-            stop,
-            max_misses,
-        }
-    }
 }
 
 /// Find Iterator
@@ -464,53 +416,6 @@ impl<'a, T: Eq + Clone> Iterator for IterFind<'a, T> {
     }
 }
 
-// FindSkipMisses Iterator
-#[derive(Debug)]
-pub struct IterFindSkip<'a, T>
-where
-    T: Eq + Clone + 'a,
-{
-    inner: &'a Lapper<T>,
-    off: usize,
-    end: usize,
-    start: usize,
-    stop: usize,
-    max_misses: u32,
-}
-
-impl<'a, T: Eq + Clone> Iterator for IterFindSkip<'a, T> {
-    type Item = &'a Interval<T>;
-
-    // This is doing a tricky thing. If we haven't seen an overlap in the last max_misses
-    // intervals, then we are probably in a scenario where there was a very long interval that
-    // encompasses a bunch of small intervals. Instead of iterating over all the small intervals,
-    // recalculate the offset by doing a binary search on slice of the intervals from current
-    // offset .. end. This drastically reduceds the worst case scenario, and barely affects the
-    // best case.
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut misses = 0;
-        while self.off < self.end {
-            if misses > self.max_misses {
-                let new_off = self.inner.lower_bound_offset(self.start.checked_sub(self.inner.max_len).unwrap_or(0), &self.inner.intervals[self.off..]) + self.off;
-                self.off = new_off;
-                misses = 0;
-            }
-            if self.off == self.end {
-                break;
-            }
-            let interval = &self.inner.intervals[self.off];
-            self.off += 1;
-            if interval.overlap(self.start, self.stop) {
-                return Some(interval);
-            } else if interval.start >= self.stop {
-                break;
-            }
-            misses += 1;
-        }
-        None
-    }
-}
 /// Lapper Iterator
 pub struct IterLapper<'a, T>
 where
@@ -819,13 +724,13 @@ mod tests {
             Iv{start: 150, stop: 200, val: 0},
         ];
         let lapper = Lapper::new(data1);
-        let found = lapper.find_skip(8, 11, 2).collect::<Vec<&Iv>>();
+        let found = lapper.find(8, 11).collect::<Vec<&Iv>>();
         assert_eq!(found, vec![
             &Iv{start: 1, stop: 10, val: 0}, 
             &Iv{start: 9, stop: 11, val: 0},
             &Iv{start: 10, stop: 13, val: 0},
         ]);
-        let found = lapper.find_skip(145, 151, 2).collect::<Vec<&Iv>>();
+        let found = lapper.find(145, 151).collect::<Vec<&Iv>>();
         assert_eq!(found, vec![
             &Iv{start: 100, stop: 200, val: 0},
             &Iv{start: 111, stop: 160, val: 0},
@@ -875,7 +780,7 @@ mod tests {
         ];
         let lapper = Lapper::new(data);
 
-        let found = lapper.find_skip(28974798, 33141355, 2).collect::<Vec<&Iv>>();
+        let found = lapper.find(28974798, 33141355).collect::<Vec<&Iv>>();
         assert_eq!(found, vec![
             &Iv{start:28866309, stop: 33141404	, val: 0},
         ])

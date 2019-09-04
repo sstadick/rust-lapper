@@ -12,35 +12,29 @@ This is a rust port of Brent Pendersen's
 differences, mostly that the find and seek methods both return
 iterators, so all adaptor methods may be used normally.
 
+This crate works well for interval data that does not include very long
+intervals that engulf a majority of other intervals. In comparisons against
+other intervals trees, it is twice as slow in the worst case scenario of an
+interval spanning the whole set of possible positions.
+
+However, on more typical datasets, this crate is between 4-10x faster
+than other interval overlap methods.
 
 ## Benchmarks
 
-```text
-find with 100% hit rate
-			time:   [43.113 us 43.133 us 43.155 us]
-find with below 100% hit rate
-                        time:   [11.939 us 11.953 us 11.970 us]
+Benchmarks performed on a sub 100% hit rate dataset:
+![rust-lapper find](./images/rust_lapper_find_mean.svg)
+![rust-lapper seek](./images/rust_lapper_seek_mean.svg)
+![nested_intervals](./images/nested_intervals_mean.svg)
+![rust-bio](./images/rust_bio_mean.svg)
 
-seek with 100% hit rate
-			time:   [10.019 us 10.045 us 10.071 us]
-seek with below 100% hit rate
-                        time:   [4.6375 us 4.6947 us 4.7810 us]
+Benchmarks with a whole set spanning interval:
+![rust-lapper find](./images/rust_lapper_find_bad.svg)
+![nested_intervals](./images/nested_intervals_bad_mean.svg)
+![rust-bio](./images/rust_bio_bad_mean.svg)
 
-find_skip with 100% hit rate
-                        time:   [45.527 us 45.585 us 45.651 us]
-find_skip with below 100% hit rate
-                        time:   [15.377 us 15.457 us 15.544 us]
-
-seek_skip with 100% hit rate
-                        time:   [21.128 us 21.133 us 21.138 us]
-seek_skip with below 100% hit rate
-                        time:   [8.0562 us 8.0600 us 8.0642 us]
-
-find with 100% hit rate - chromosome spanning interval
-                        time:   [313.82 us 313.97 us 314.14 us]
-find_skip below 100% hit rate - chromosome spanning interval
-                        time:   [229.83 us 230.29 us 230.76 us]
-```
+![nested_intervals](https://docs.rs/nested_intervals/0.2.0/nested_intervals/)
+![rust-bio](https://docs.rs/bio/0.28.2/bio/)
 
 ## Example
 
