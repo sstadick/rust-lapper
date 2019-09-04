@@ -1,0 +1,240 @@
+
+running 15 tests
+test tests::test_bad_skips ... ignored
+test tests::test_find_over_behind_first_match ... ignored
+test tests::test_find_overlaps_in_large_intervals ... ignored
+test tests::test_interval_envelops_query ... ignored
+test tests::test_interval_intersects ... ignored
+test tests::test_lapper_cov ... ignored
+test tests::test_merge_overlaps ... ignored
+test tests::test_overlapping_intervals ... ignored
+test tests::test_query_envolops_interval ... ignored
+test tests::test_query_overlaps_interval_start ... ignored
+test tests::test_query_overlaps_interval_stop ... ignored
+test tests::test_query_start_interval_stop ... ignored
+test tests::test_query_stop_interval_start ... ignored
+test tests::test_seek_over_len ... ignored
+test tests::test_union_and_intersect ... ignored
+
+test result: ok. 0 passed; 0 failed; 15 ignored; 0 measured; 0 filtered out
+
+Gnuplot not found, disabling plotting
+Benchmarking Bakeoff/rust-lapper: find with 100% hit rate
+Benchmarking Bakeoff/rust-lapper: find with 100% hit rate: Warming up for 3.0000 s
+Benchmarking Bakeoff/rust-lapper: find with 100% hit rate: Collecting 100 samples in estimated 5.2105 s (121k iterations)
+Benchmarking Bakeoff/rust-lapper: find with 100% hit rate: Analyzing
+Bakeoff/rust-lapper: find with 100% hit rate
+                        time:   [42.747 us 42.800 us 42.865 us]
+Found 19 outliers among 100 measurements (19.00%)
+  2 (2.00%) high mild
+  17 (17.00%) high severe
+Benchmarking Bakeoff/rust-lapper: find with below 100% hit rate
+Benchmarking Bakeoff/rust-lapper: find with below 100% hit rate: Warming up for 3.0000 s
+Benchmarking Bakeoff/rust-lapper: find with below 100% hit rate: Collecting 100 samples in estimated 5.0269 s (404k iterations)
+Benchmarking Bakeoff/rust-lapper: find with below 100% hit rate: Analyzing
+Bakeoff/rust-lapper: find with below 100% hit rate
+                        time:   [11.878 us 11.886 us 11.895 us]
+Found 7 outliers among 100 measurements (7.00%)
+  2 (2.00%) high mild
+  5 (5.00%) high severe
+Benchmarking Bakeoff/rust-lapper: seek with 100% hit rate
+Benchmarking Bakeoff/rust-lapper: seek with 100% hit rate: Warming up for 3.0000 s
+Benchmarking Bakeoff/rust-lapper: seek with 100% hit rate: Collecting 100 samples in estimated 5.0049 s (490k iterations)
+Benchmarking Bakeoff/rust-lapper: seek with 100% hit rate: Analyzing
+Bakeoff/rust-lapper: seek with 100% hit rate
+                        time:   [10.170 us 10.223 us 10.299 us]
+Found 10 outliers among 100 measurements (10.00%)
+  5 (5.00%) high mild
+  5 (5.00%) high severe
+Benchmarking Bakeoff/rust-lapper: seek with below 100% hit rate
+Benchmarking Bakeoff/rust-lapper: seek with below 100% hit rate: Warming up for 3.0000 s
+Benchmarking Bakeoff/rust-lapper: seek with below 100% hit rate: Collecting 100 samples in estimated 5.0103 s (1.6M iterations)
+Benchmarking Bakeoff/rust-lapper: seek with below 100% hit rate: Analyzing
+Bakeoff/rust-lapper: seek with below 100% hit rate
+                        time:   [3.1775 us 3.1825 us 3.1882 us]
+Found 20 outliers among 100 measurements (20.00%)
+  1 (1.00%) high mild
+  19 (19.00%) high severe
+Benchmarking Bakeoff/rust-lapper: find with below 100% hit rate - chromosome spanning interval
+Benchmarking Bakeoff/rust-lapper: find with below 100% hit rate - chromosome spanning interval: Warming up for 3.0000 s
+Benchmarking Bakeoff/rust-lapper: find with below 100% hit rate - chromosome spanning interval: Collecting 100 samples in estimated 5.0101 s (81k iterations)
+Benchmarking Bakeoff/rust-lapper: find with below 100% hit rate - chromosome spanning interval: Analyzing
+Bakeoff/rust-lapper: find with below 100% hit rate - chromosome spanning interval
+                        time:   [61.147 us 61.184 us 61.228 us]
+Found 8 outliers among 100 measurements (8.00%)
+  3 (3.00%) high mild
+  5 (5.00%) high severe
+Benchmarking Bakeoff/rust-lapper: seek with below 100% hit rate - chromosome spanning interval
+Benchmarking Bakeoff/rust-lapper: seek with below 100% hit rate - chromosome spanning interval: Warming up for 3.0000 s
+Benchmarking Bakeoff/rust-lapper: seek with below 100% hit rate - chromosome spanning interval: Collecting 100 samples in estimated 5.0015 s (81k iterations)
+Benchmarking Bakeoff/rust-lapper: seek with below 100% hit rate - chromosome spanning interval: Analyzing
+Bakeoff/rust-lapper: seek with below 100% hit rate - chromosome spanning interval
+                        time:   [61.353 us 61.386 us 61.431 us]
+Found 10 outliers among 100 measurements (10.00%)
+  1 (1.00%) low severe
+  4 (4.00%) high mild
+  5 (5.00%) high severe
+Benchmarking Bakeoff/nested_intervals: query_overlapping with 100% hit rate
+Benchmarking Bakeoff/nested_intervals: query_overlapping with 100% hit rate: Warming up for 3.0000 s
+Benchmarking Bakeoff/nested_intervals: query_overlapping with 100% hit rate: Collecting 100 samples in estimated 5.5951 s (25k iterations)
+Benchmarking Bakeoff/nested_intervals: query_overlapping with 100% hit rate: Analyzing
+Bakeoff/nested_intervals: query_overlapping with 100% hit rate
+                        time:   [221.03 us 221.08 us 221.13 us]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+Benchmarking Bakeoff/nested_intervals: query_overlapping with below 100% hit rate
+Benchmarking Bakeoff/nested_intervals: query_overlapping with below 100% hit rate: Warming up for 3.0000 s
+Benchmarking Bakeoff/nested_intervals: query_overlapping with below 100% hit rate: Collecting 100 samples in estimated 5.0202 s (141k iterations)
+Benchmarking Bakeoff/nested_intervals: query_overlapping with below 100% hit rate: Analyzing
+Bakeoff/nested_intervals: query_overlapping with below 100% hit rate
+                        time:   [34.301 us 34.500 us 34.728 us]
+Found 12 outliers among 100 measurements (12.00%)
+  12 (12.00%) high severe
+Benchmarking Bakeoff/nested_intervals: query_overlapping with below 100% hit rate - chromosome spanning interval
+Benchmarking Bakeoff/nested_intervals: query_overlapping with below 100% hit rate - chromosome spanning interval: Warming up for 3.0000 s
+Benchmarking Bakeoff/nested_intervals: query_overlapping with below 100% hit rate - chromosome spanning interval: Collecting 100 samples in estimated 5.1724 s (141k iterations)
+Benchmarking Bakeoff/nested_intervals: query_overlapping with below 100% hit rate - chromosome spanning interval: Analyzing
+Bakeoff/nested_intervals: query_overlapping with below 100% hit rate - chromosome spanning interval
+                        time:   [36.109 us 36.144 us 36.188 us]
+Found 12 outliers among 100 measurements (12.00%)
+  5 (5.00%) high mild
+  7 (7.00%) high severe
+Benchmarking Bakeoff/rust-bio: find with 100% hit rate
+Benchmarking Bakeoff/rust-bio: find with 100% hit rate: Warming up for 3.0000 s
+Benchmarking Bakeoff/rust-bio: find with 100% hit rate: Collecting 100 samples in estimated 6.1123 s (25k iterations)
+Benchmarking Bakeoff/rust-bio: find with 100% hit rate: Analyzing
+Bakeoff/rust-bio: find with 100% hit rate
+                        time:   [240.43 us 240.82 us 241.31 us]
+Found 10 outliers among 100 measurements (10.00%)
+  1 (1.00%) high mild
+  9 (9.00%) high severe
+Benchmarking Bakeoff/rust-bio: find with below 100% hit rate
+Benchmarking Bakeoff/rust-bio: find with below 100% hit rate: Warming up for 3.0000 s
+Benchmarking Bakeoff/rust-bio: find with below 100% hit rate: Collecting 100 samples in estimated 5.1431 s (167k iterations)
+Benchmarking Bakeoff/rust-bio: find with below 100% hit rate: Analyzing
+Bakeoff/rust-bio: find with below 100% hit rate
+                        time:   [30.597 us 30.664 us 30.747 us]
+Found 11 outliers among 100 measurements (11.00%)
+  11 (11.00%) high severe
+Benchmarking Bakeoff/rust-bio: find with below 100% hit rate - chromosome spanning interval
+Benchmarking Bakeoff/rust-bio: find with below 100% hit rate - chromosome spanning interval: Warming up for 3.0000 s
+Benchmarking Bakeoff/rust-bio: find with below 100% hit rate - chromosome spanning interval: Collecting 100 samples in estimated 5.1201 s (146k iterations)
+Benchmarking Bakeoff/rust-bio: find with below 100% hit rate - chromosome spanning interval: Analyzing
+Bakeoff/rust-bio: find with below 100% hit rate - chromosome spanning interval
+                        time:   [34.506 us 34.691 us 34.976 us]
+Found 6 outliers among 100 measurements (6.00%)
+  1 (1.00%) high mild
+  5 (5.00%) high severe
+
+Benchmarking Lapper find overlaps/find with 100% hit rate
+Benchmarking Lapper find overlaps/find with 100% hit rate: Warming up for 3.0000 s
+Benchmarking Lapper find overlaps/find with 100% hit rate: Collecting 100 samples in estimated 5.2006 s (121k iterations)
+Benchmarking Lapper find overlaps/find with 100% hit rate: Analyzing
+Lapper find overlaps/find with 100% hit rate
+                        time:   [42.924 us 43.187 us 43.502 us]
+                        change: [-8.6658% -6.6530% -4.6975%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 14 outliers among 100 measurements (14.00%)
+  1 (1.00%) low mild
+  3 (3.00%) high mild
+  10 (10.00%) high severe
+Benchmarking Lapper find overlaps/find with below 100% hit rate
+Benchmarking Lapper find overlaps/find with below 100% hit rate: Warming up for 3.0000 s
+Benchmarking Lapper find overlaps/find with below 100% hit rate: Collecting 100 samples in estimated 5.0457 s (424k iterations)
+Benchmarking Lapper find overlaps/find with below 100% hit rate: Analyzing
+Lapper find overlaps/find with below 100% hit rate
+                        time:   [11.860 us 11.869 us 11.880 us]
+                        change: [-6.0899% -5.6600% -5.2772%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 10 outliers among 100 measurements (10.00%)
+  2 (2.00%) high mild
+  8 (8.00%) high severe
+Benchmarking Lapper find overlaps/find_skip with 100% hit rate
+Benchmarking Lapper find overlaps/find_skip with 100% hit rate: Warming up for 3.0000 s
+Benchmarking Lapper find overlaps/find_skip with 100% hit rate: Collecting 100 samples in estimated 5.1851 s (111k iterations)
+Benchmarking Lapper find overlaps/find_skip with 100% hit rate: Analyzing
+Lapper find overlaps/find_skip with 100% hit rate
+                        time:   [43.896 us 43.970 us 44.063 us]
+                        change: [-8.1682% -7.3897% -6.6098%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Benchmarking Lapper find overlaps/find_skip with below 100% hit rate
+Benchmarking Lapper find overlaps/find_skip with below 100% hit rate: Warming up for 3.0000 s
+Benchmarking Lapper find overlaps/find_skip with below 100% hit rate: Collecting 100 samples in estimated 5.0628 s (359k iterations)
+Benchmarking Lapper find overlaps/find_skip with below 100% hit rate: Analyzing
+Lapper find overlaps/find_skip with below 100% hit rate
+                        time:   [14.081 us 14.085 us 14.088 us]
+                        change: [-1.3755% -1.1823% -1.0482%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 4 outliers among 100 measurements (4.00%)
+  2 (2.00%) low severe
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking Lapper find overlaps/find with 100% hit rate - chromosome spanning interval
+Benchmarking Lapper find overlaps/find with 100% hit rate - chromosome spanning interval: Warming up for 3.0000 s
+Benchmarking Lapper find overlaps/find with 100% hit rate - chromosome spanning interval: Collecting 100 samples in estimated 6.2907 s (20k iterations)
+Benchmarking Lapper find overlaps/find with 100% hit rate - chromosome spanning interval: Analyzing
+Lapper find overlaps/find with 100% hit rate - chromosome spanning interval
+                        time:   [310.57 us 310.86 us 311.21 us]
+                        change: [-0.9177% -0.5656% -0.2312%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Found 10 outliers among 100 measurements (10.00%)
+  2 (2.00%) high mild
+  8 (8.00%) high severe
+Benchmarking Lapper find overlaps/find_skip below 100% hit rate - chromsome spanning interval
+Benchmarking Lapper find overlaps/find_skip below 100% hit rate - chromsome spanning interval: Warming up for 3.0000 s
+Benchmarking Lapper find overlaps/find_skip below 100% hit rate - chromsome spanning interval: Collecting 100 samples in estimated 5.0362 s (20k iterations)
+Benchmarking Lapper find overlaps/find_skip below 100% hit rate - chromsome spanning interval: Analyzing
+Lapper find overlaps/find_skip below 100% hit rate - chromsome spanning interval
+                        time:   [240.98 us 241.29 us 241.64 us]
+                        change: [-12.895% -12.647% -12.376%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 7 outliers among 100 measurements (7.00%)
+  2 (2.00%) high mild
+  5 (5.00%) high severe
+Benchmarking Lapper find overlaps/seek with 100% hit rate
+Benchmarking Lapper find overlaps/seek with 100% hit rate: Warming up for 3.0000 s
+Benchmarking Lapper find overlaps/seek with 100% hit rate: Collecting 100 samples in estimated 5.0021 s (490k iterations)
+Benchmarking Lapper find overlaps/seek with 100% hit rate: Analyzing
+Lapper find overlaps/seek with 100% hit rate
+                        time:   [10.097 us 10.107 us 10.118 us]
+                        change: [-0.7407% -0.5673% -0.4081%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Found 7 outliers among 100 measurements (7.00%)
+  5 (5.00%) high mild
+  2 (2.00%) high severe
+Benchmarking Lapper find overlaps/seek with below 100% hit rate
+Benchmarking Lapper find overlaps/seek with below 100% hit rate: Warming up for 3.0000 s
+Benchmarking Lapper find overlaps/seek with below 100% hit rate: Collecting 100 samples in estimated 5.0023 s (1.6M iterations)
+Benchmarking Lapper find overlaps/seek with below 100% hit rate: Analyzing
+Lapper find overlaps/seek with below 100% hit rate
+                        time:   [3.1711 us 3.1745 us 3.1785 us]
+                        change: [-5.2600% -4.7691% -4.3226%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 11 outliers among 100 measurements (11.00%)
+  7 (7.00%) high mild
+  4 (4.00%) high severe
+Benchmarking Lapper find overlaps/seek_skip with 100% hit rate
+Benchmarking Lapper find overlaps/seek_skip with 100% hit rate: Warming up for 3.0000 s
+Benchmarking Lapper find overlaps/seek_skip with 100% hit rate: Collecting 100 samples in estimated 5.0386 s (242k iterations)
+Benchmarking Lapper find overlaps/seek_skip with 100% hit rate: Analyzing
+Lapper find overlaps/seek_skip with 100% hit rate
+                        time:   [20.366 us 20.385 us 20.408 us]
+                        change: [-7.7326% -7.3996% -7.1256%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 10 outliers among 100 measurements (10.00%)
+  4 (4.00%) low mild
+  3 (3.00%) high mild
+  3 (3.00%) high severe
+Benchmarking Lapper find overlaps/seek_skip with below 100% hit rate
+Benchmarking Lapper find overlaps/seek_skip with below 100% hit rate: Warming up for 3.0000 s
+Benchmarking Lapper find overlaps/seek_skip with below 100% hit rate: Collecting 100 samples in estimated 5.0176 s (692k iterations)
+Benchmarking Lapper find overlaps/seek_skip with below 100% hit rate: Analyzing
+Lapper find overlaps/seek_skip with below 100% hit rate
+                        time:   [7.1981 us 7.2062 us 7.2163 us]
+                        change: [-5.7748% -5.1467% -4.5538%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 14 outliers among 100 measurements (14.00%)
+  6 (6.00%) high mild
+  8 (8.00%) high severe
+
+Gnuplot not found, disabling plotting
