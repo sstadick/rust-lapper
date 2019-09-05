@@ -335,6 +335,21 @@ impl<T: Eq + Clone> Lapper<T> {
         self.union_and_intersect(other).0
     }
 
+    /// Return the contiguous intervals of coverage, `val` represents the number of intervals
+    /// covering the returned interval.
+    ///
+    /// # Examples
+    /// ```
+    /// use rust_lapper::{Lapper, Interval};
+    /// let data = (0..20).step_by(5)
+    ///                   .map(|x| Interval{start: x, stop: x + 10, val: true})
+    ///                   .collect::<Vec<Interval<bool>>>();
+    /// let lapper = Lapper::new(data);
+    /// assert_eq!(lapper.depth().collect::<Vec<Interval<u32>>>(), vec![
+    ///             Interval { start: 0, stop: 5, val: 1 },
+    ///             Interval { start: 5, stop: 20, val: 2 },
+    ///             Interval { start: 20, stop: 25, val: 1 }]);
+    /// ```
     #[inline]
     pub fn depth(&self) -> IterDepth<T> {
         let mut merged_lapper = Lapper::new(
