@@ -456,8 +456,8 @@ impl<'a, T: Eq + Clone> Iterator for IterDepth<'a, T> {
         if interval.stop == self.curr_merged_pos {
             if self.curr_pos + 1 != self.end {
                 self.curr_pos += 1;
-                self.curr_merged_pos = interval.start;
                 interval = &self.merged.intervals[self.curr_pos];
+                self.curr_merged_pos = interval.start;
             } else {
                 return None;
             }
@@ -472,7 +472,7 @@ impl<'a, T: Eq + Clone> Iterator for IterDepth<'a, T> {
             )
             .count();
         let mut new_depth_at_point = depth_at_point;
-        while new_depth_at_point == depth_at_point && self.curr_merged_pos != interval.stop {
+        while new_depth_at_point == depth_at_point && self.curr_merged_pos < interval.stop {
             self.curr_merged_pos += 1;
             new_depth_at_point = self
                 .inner
@@ -848,6 +848,30 @@ mod tests {
                    Interval{start: 8, stop: 9, val: 1},
                    Interval{start: 9, stop: 10, val: 2},
                    Interval{start: 10, stop: 11, val: 1},
+        ]);
+    }
+    #[test]
+    fn test_depth_harder() {
+        let data1: Vec<Iv> = vec![
+            Iv{start: 1, stop: 10, val: 0},
+            Iv{start: 2, stop: 5, val: 0},
+            Iv{start: 3, stop: 8, val: 0},
+            Iv{start: 3, stop: 8, val: 0},
+            Iv{start: 3, stop: 8, val: 0},
+            Iv{start: 5, stop: 8, val: 0},
+            Iv{start: 9, stop: 11, val: 0},
+            Iv{start: 15, stop: 20, val: 0},
+        ];
+        let lapper = Lapper::new(data1);
+        let found = lapper.depth().collect::<Vec<Interval<u32>>>();
+        assert_eq!(found, vec![
+                   Interval{start: 1, stop: 2, val: 1},
+                   Interval{start: 2, stop: 3, val: 2},
+                   Interval{start: 3, stop: 8, val: 5},
+                   Interval{start: 8, stop: 9, val: 1},
+                   Interval{start: 9, stop: 10, val: 2},
+                   Interval{start: 10, stop: 11, val: 1},
+                   Interval{start: 15, stop: 20, val: 1},
         ]);
     }
     // BUG TESTS - these are tests that came from real life
