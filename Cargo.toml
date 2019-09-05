@@ -5,7 +5,7 @@ authors = ["Seth Stadick <sstadick@gmail.com>"]
 edition = "2018"
 license = "MIT"
 repository = "https://github.com/sstadick/rust-lapper"
-description = "A fast and easy library for interval overlap library"
+description = "A fast and easy interval overlap library"
 documentation = "https://docs.rs/rust-lapper"
 readme = "README.md"
 categories = ["algorithms", "science"]
@@ -18,7 +18,8 @@ criterion = "0.3"
 rand = "0.7"
 cpu-time = "0.1.0"
 # nested_intervals hasn't had a build pushed yet that doesn't require unstable
-nested_intervals = "0.2.0"
+nested_intervals = {path = "../nested_intervals"}
+#nested_intervals = "0.2.0"
 bio = "0.28.2"
 
 [[bench]]
