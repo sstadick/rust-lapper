@@ -23,15 +23,23 @@ than other interval overlap methods.
 ## Benchmarks
 
 Benchmarks performed on a sub 100% hit rate dataset:
-![rust-lapper find](./images/rust_lapper_find_mean.svg)
-![rust-lapper seek](./images/rust_lapper_seek_mean.svg)
-![nested_intervals](./images/nested_intervals_mean.svg)
-![rust-bio](./images/rust_bio_mean.svg)
+
+|crate/method|mean time|
+|------------|---------|
+|rust_lapper/find|11.886 us|
+|rust_lapper/seek|3.1825 us|
+|nested_intervals/query_overlapping|34.500 us|
+|bio/find|30.664|
+
 
 Benchmarks with a whole set spanning interval:
-![rust-lapper find](./images/rust_lapper_find_bad.svg)
-![nested_intervals](./images/nested_intervals_bad_mean.svg)
-![rust-bio](./images/rust_bio_bad_mean.svg)
+
+|crate/method|mean time|
+|------------|---------|
+|rust_lapper/find|61.184 us|
+|rust_lapper/seek|61.386 us|
+|nested_intervals/query_overlapping|36.144|
+|bio/find|34.691 us|
 
 ![nested_intervals](https://docs.rs/nested_intervals/0.2.0/nested_intervals/)
 ![rust-bio](https://docs.rs/bio/0.28.2/bio/)
