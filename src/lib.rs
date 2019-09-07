@@ -23,9 +23,9 @@
 //! Answer: ((0,10], (5,9], (8,11])
 //! ```
 //!
-//! Most interaction with this crate will be through the `[Lapper](struct.Lapper.html)` struct
-//! The main methods are `[find](struct.Lapper.html#method.find)` and
-//! `[seek](struct.Lapper.html#method.seek)` where the latter uses a cursor and is very fast for
+//! Most interaction with this crate will be through the [`Lapper`](struct.Lapper.html) struct
+//! The main methods are [`find`](struct.Lapper.html#method.find) and
+//! [`seek`](struct.Lapper.html#method.seek) where the latter uses a cursor and is very fast for
 //! cases when the queries are sorted. This is another innovation in this library that allows an
 //! additional ~50% speed improvement when consecutive queries are known to be in sort order.
 //!
