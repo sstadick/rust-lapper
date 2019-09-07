@@ -1,6 +1,6 @@
 [package]
 name = "rust-lapper"
-version = "0.3.6"
+version = "0.3.7"
 authors = ["Seth Stadick <sstadick@gmail.com>"]
 edition = "2018"
 license = "MIT"
@@ -18,8 +18,8 @@ criterion = "0.3"
 rand = "0.7"
 cpu-time = "0.1.0"
 # nested_intervals hasn't had a build pushed yet that doesn't require unstable
-#nested_intervals = {path = "../nested_intervals"}
-nested_intervals = "0.2.0"
+nested_intervals = {path = "../nested_intervals"}
+#nested_intervals = "0.2.0"
 bio = "0.28.2"
 
 [[bench]]

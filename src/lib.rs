@@ -23,7 +23,9 @@
 //! Answer: ((0,10], (5,9], (8,11])
 //! ```
 //!
-//! The main methods are `find` and `seek` where the latter uses a cursor and is very fast for
+//! Most interaction with this crate will be through the `[Lapper](struct.Lapper.html)` struct
+//! The main methods are `[find](struct.Lapper.html#method.find)` and
+//! `[seek](struct.Lapper.html#method.seek)` where the latter uses a cursor and is very fast for
 //! cases when the queries are sorted. This is another innovation in this library that allows an
 //! additional ~50% speed improvement when consecutive queries are known to be in sort order.
 //!
@@ -72,7 +74,6 @@
 //!    }
 //!    assert_eq!(sim, 4);
 //! ```
-//#![feature(asm)]
 use std::cmp::Ordering::{self};
 use std::collections::VecDeque;
 
@@ -147,6 +148,13 @@ impl<T: Eq + Clone> PartialEq for Interval<T> {
 impl<T: Eq + Clone> Lapper<T> {
     /// Create a new instance of Lapper by passing in a vector of Intervals. This vector will
     /// immediately be sorted by start order.
+    /// ```
+    /// use rust_lapper::{Lapper, Interval};
+    /// let data = (0..20).step_by(5)
+    ///                   .map(|x| Interval{start: x, stop: x + 10, val: true})
+    ///                   .collect::<Vec<Interval<bool>>>();
+    /// let lapper = Lapper::new(data);
+    /// ```
     pub fn new(mut intervals: Vec<Interval<T>>) -> Self {
         intervals.sort();
         let mut max_len = 0;
@@ -166,12 +174,26 @@ impl<T: Eq + Clone> Lapper<T> {
     }
 
     /// Get the number over intervals in Lapper
+    /// ```
+    /// use rust_lapper::{Lapper, Interval};
+    /// let data = (0..20).step_by(5)
+    ///                   .map(|x| Interval{start: x, stop: x + 10, val: true})
+    ///                   .collect::<Vec<Interval<bool>>>();
+    /// let lapper = Lapper::new(data);
+    /// assert_eq!(lapper.len(), 4);
+    /// ```
     #[inline]
     pub fn len(&self) -> usize {
         self.intervals.len()
     }
 
     /// Check if lapper is empty
+    /// ```
+    /// use rust_lapper::{Lapper, Interval};
+    /// let data: Vec<Interval<bool>> = vec![];
+    /// let lapper = Lapper::new(data);
+    /// assert_eq!(lapper.is_empty(), true);
+    /// ```
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.intervals.is_empty()
@@ -179,6 +201,13 @@ impl<T: Eq + Clone> Lapper<T> {
 
     /// Get the number of positions covered by the intervals in Lapper. This provides immutable
     /// access if it has already been set, or on the fly calculation.
+    /// ```
+    /// use rust_lapper::{Lapper, Interval};
+    /// let data = (0..20).step_by(5)
+    ///                   .map(|x| Interval{start: x, stop: x + 10, val: true})
+    ///                   .collect::<Vec<Interval<bool>>>();
+    /// let lapper = Lapper::new(data);
+    /// assert_eq!(lapper.cov(), 25);
     #[inline]
     pub fn cov(&self) -> usize {
         match self.cov {
@@ -286,6 +315,46 @@ impl<T: Eq + Clone> Lapper<T> {
     /// Union: The set of positions found in both lappers
     /// Intersect: The number of positions where both lappers intersect. Note that a position only
     /// counts one time, multiple Intervals covering the same position don't add up.
+    /// ``` rust
+    /// use rust_lapper::{Lapper, Interval};
+    /// type Iv = Interval<u32>;
+    /// let data1: Vec<Iv> = vec![
+    ///     Iv{start: 70, stop: 120, val: 0}, // max_len = 50
+    ///     Iv{start: 10, stop: 15, val: 0}, // exact overlap
+    ///     Iv{start: 12, stop: 15, val: 0}, // inner overlap
+    ///     Iv{start: 14, stop: 16, val: 0}, // overlap end
+    ///     Iv{start: 68, stop: 71, val: 0}, // overlap start
+    /// ];
+    /// let data2: Vec<Iv> = vec![
+    ///
+    ///     Iv{start: 10, stop: 15, val: 0},
+    ///     Iv{start: 40, stop: 45, val: 0},
+    ///     Iv{start: 50, stop: 55, val: 0},
+    ///     Iv{start: 60, stop: 65, val: 0},
+    ///     Iv{start: 70, stop: 75, val: 0},
+    /// ];
+    ///
+    /// let (mut lapper1, mut lapper2) = (Lapper::new(data1), Lapper::new(data2)) ;
+    /// // Should be the same either way it's calculated
+    /// let (union, intersect) = lapper1.union_and_intersect(&lapper2);
+    /// assert_eq!(intersect, 10);
+    /// assert_eq!(union, 73);
+    /// let (union, intersect) = lapper2.union_and_intersect(&lapper1);
+    /// assert_eq!(intersect, 10);
+    /// assert_eq!(union, 73);
+    /// lapper1.merge_overlaps();
+    /// lapper1.set_cov();
+    /// lapper2.merge_overlaps();
+    /// lapper2.set_cov();
+    ///
+    /// // Should be the same either way it's calculated
+    /// let (union, intersect) = lapper1.union_and_intersect(&lapper2);
+    /// assert_eq!(intersect, 10);
+    /// assert_eq!(union, 73);
+    /// let (union, intersect) = lapper2.union_and_intersect(&lapper1);
+    /// assert_eq!(intersect, 10);
+    /// assert_eq!(union, 73);
+    /// ```
     #[inline]
     pub fn union_and_intersect(&self, other: &Self) -> (usize, usize) {
         let mut cursor: usize = 0;
@@ -375,6 +444,13 @@ impl<T: Eq + Clone> Lapper<T> {
     }
 
     /// Find all intervals that overlap start .. stop
+    /// ```
+    /// use rust_lapper::{Lapper, Interval};
+    /// let lapper = Lapper::new((0..100).step_by(5)
+    ///                                 .map(|x| Interval{start: x, stop: x+2 , val: true})
+    ///                                 .collect::<Vec<Interval<bool>>>());
+    /// assert_eq!(lapper.find(5, 11).count(), 2);
+    /// ```
     #[inline]
     pub fn find(&self, start: usize, stop: usize) -> IterFind<T> {
         IterFind {
@@ -391,6 +467,16 @@ impl<T: Eq + Clone> Lapper<T> {
     /// instead of a binary search. A reference to a cursor must be passed in. This reference will
     /// be modified and should be reused in the next query. This allows seek to not need to make
     /// the lapper object mutable, and thus use the same lapper accross threads.
+    /// ```
+    /// use rust_lapper::{Lapper, Interval};
+    /// let lapper = Lapper::new((0..100).step_by(5)
+    ///                                 .map(|x| Interval{start: x, stop: x+2 , val: true})
+    ///                                 .collect::<Vec<Interval<bool>>>());
+    /// let mut cursor = 0;
+    /// for i in lapper.iter() {
+    ///    assert_eq!(lapper.seek(i.start, i.stop, &mut cursor).count(), 1);
+    /// }
+    /// ```
     #[inline]
     pub fn seek<'a>(&'a self, start: usize, stop: usize, cursor: &mut usize) -> IterFind<'a, T> {
         if *cursor == 0 || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
