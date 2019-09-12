@@ -32,7 +32,7 @@ Benchmarks performed on a sub 100% hit rate dataset:
 |bio/find|30.664|
 
 
-Benchmarks with a whole set spanning interval:
+Benchmarks with a whole set spanning interval and sub 100% hit rate:
 
 |crate/method|mean time|
 |------------|---------|
@@ -41,8 +41,9 @@ Benchmarks with a whole set spanning interval:
 |nested_intervals/query_overlapping|36.144|
 |bio/find|34.691 us|
 
-![nested_intervals](https://docs.rs/nested_intervals/0.2.0/nested_intervals/)
-![rust-bio](https://docs.rs/bio/0.28.2/bio/)
+[nested_intervals](https://docs.rs/nested_intervals/0.2.0/nested_intervals/)
+
+[rust-bio](https://docs.rs/bio/0.28.2/bio/)
 
 ## Example
 

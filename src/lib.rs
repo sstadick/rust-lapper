@@ -23,7 +23,7 @@
 //! Answer: ((0,10], (5,9], (8,11])
 //! ```
 //!
-//! Most interaction with this crate will be through the [`Lapper`](struct.Lapper.html) struct
+//! Most interaction with this crate will be through the [`Lapper``](struct.Lapper.html)` struct
 //! The main methods are [`find`](struct.Lapper.html#method.find) and
 //! [`seek`](struct.Lapper.html#method.seek) where the latter uses a cursor and is very fast for
 //! cases when the queries are sorted. This is another innovation in this library that allows an
@@ -295,8 +295,8 @@ impl<T: Eq + Clone> Lapper<T> {
     /// Determine the first index that we should start checking for overlaps for via a binary
     /// search.
     #[inline]
-    fn lower_bound(&self, start: usize) -> usize {
-        let mut size = self.intervals.len();
+    pub fn lower_bound(start: usize, intervals: &[Interval<T>]) -> usize {
+        let mut size = intervals.len();
         let mut low = 0;
 
         while size > 0 {
@@ -304,12 +304,29 @@ impl<T: Eq + Clone> Lapper<T> {
             let other_half = size - half;
             let probe = low + half;
             let other_low = low + other_half;
-            let v = &self.intervals[probe];
+            let v = &intervals[probe];
             size = half;
             low = if v.start < start { other_low } else { low }
         }
         low
     }
+
+    //#[inline]
+    //fn lower_bound(&self, start: usize) -> usize {
+    //let mut size = self.intervals.len();
+    //let mut low = 0;
+
+    //while size > 0 {
+    //let half = size / 2;
+    //let other_half = size - half;
+    //let probe = low + half;
+    //let other_low = low + other_half;
+    //let v = &self.intervals[probe];
+    //size = half;
+    //low = if v.start < start { other_low } else { low }
+    //}
+    //low
+    //}
 
     /// Find the union and the intersect of two lapper objects.
     /// Union: The set of positions found in both lappers
@@ -455,7 +472,10 @@ impl<T: Eq + Clone> Lapper<T> {
     pub fn find(&self, start: usize, stop: usize) -> IterFind<T> {
         IterFind {
             inner: self,
-            off: self.lower_bound(start.checked_sub(self.max_len).unwrap_or(0)),
+            off: Self::lower_bound(
+                start.checked_sub(self.max_len).unwrap_or(0),
+                &self.intervals,
+            ),
             end: self.intervals.len(),
             start,
             stop,
@@ -481,7 +501,10 @@ impl<T: Eq + Clone> Lapper<T> {
     pub fn seek<'a>(&'a self, start: usize, stop: usize, cursor: &mut usize) -> IterFind<'a, T> {
         if *cursor == 0 || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
         {
-            *cursor = self.lower_bound(start.checked_sub(self.max_len).unwrap_or(0));
+            *cursor = Self::lower_bound(
+                start.checked_sub(self.max_len).unwrap_or(0),
+                &self.intervals,
+            );
         }
 
         while *cursor + 1 < self.intervals.len()
