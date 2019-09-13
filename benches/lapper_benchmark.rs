@@ -37,8 +37,7 @@ fn make_random(n: usize, range_max: usize, size_min: usize, size_max: usize) -> 
 }
 
 fn make_interval_set() -> (Vec<Iv>, Vec<Iv>, Vec<Range<u32>>, Vec<Range<u32>>) {
-    //let n = 3_000_000;
-    let n = 1_000;
+    let n = 3_000_000;
     let chrom_size = 100_000_000;
     let min_interval_size = 500;
     let max_interval_size = 80000;
@@ -114,15 +113,47 @@ pub fn query(c: &mut Criterion) {
         .iter()
         .for_each(|x| bio_bad_interval_tree.insert(x, x.start));
 
-    //let start = ProcessTime::now();
-    //println!("Starting timer");
-    //let mut count = 0;
-    //for x in lapper.iter() {
-    //count += lapper.find(x.start, x.stop).count();
-    //}
-    //let cpu_time: Duration = start.elapsed();
-    //println!("100% hit rate: {:#?}", cpu_time);
-    //println!("Found {}", count);
+    let start = ProcessTime::now();
+    println!("Starting timer");
+    let mut count = 0;
+    for x in lapper.iter() {
+        count += lapper.find(x.start, x.stop).count();
+    }
+    let cpu_time: Duration = start.elapsed();
+    println!("rust-lapper: 100% hit rate: {:#?}", cpu_time);
+    println!("Found {}", count);
+
+    let start = ProcessTime::now();
+    println!("Starting timer");
+    let mut count = 0;
+    for x in coi_tree_intervals_preserved.iter() {
+        count += coi_tree.find(x.start, x.stop).count();
+    }
+    let cpu_time: Duration = start.elapsed();
+    println!("COITree: 100% hit rate: {:#?}", cpu_time);
+    println!("Found {}", count);
+
+    let start = ProcessTime::now();
+    println!("Starting timer");
+    let mut count = 0;
+    for x in nested_intervals.iter() {
+        count += nested_interval_set.query_overlapping(x).iter().count();
+    }
+    let cpu_time: Duration = start.elapsed();
+    println!("Nested Intervals: 100% hit rate: {:#?}", cpu_time);
+    println!("Found {}", count);
+
+    let start = ProcessTime::now();
+    println!("Starting timer");
+    let mut count = 0;
+    for x in nested_intervals.iter() {
+        count += bio_interval_tree.find(x).count();
+    }
+    let cpu_time: Duration = start.elapsed();
+    println!("Bio Intervals: 100% hit rate: {:#?}", cpu_time);
+    println!("Found {}", count);
+
+    println!(">>>>>>>>>>>>>> Done");
 
     let mut comparison_group = c.benchmark_group("Bakeoff");
     comparison_group.bench_function("rust-lapper: find with 100% hit rate", |b| {

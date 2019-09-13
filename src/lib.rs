@@ -153,9 +153,13 @@ impl<T: Eq + Clone> PartialEq for Interval<T> {
 /// Index of my intervals, kind of like a van emde boas concept of a cluster
 #[derive(Debug)]
 struct Cluster {
+    // The smallest start value of any interval in the cluster
     min_start: usize,
+    // The largest stop value of any interval in the cluster
     max_stop: usize,
+    // The index in intervals that the cluster starts at
     start_index: usize,
+    // The index in intervals that the cluster stop at
     stop_index: usize,
 }
 
@@ -173,7 +177,6 @@ impl<T: Eq + Clone> Lapper<T> {
         // TODO: Check if they are sorted
         // TODO: Switch to radix sort
         intervals.sort();
-        let interval_len = intervals.len();
 
         let mut max_len = 0;
         for interval in intervals.iter() {
@@ -213,7 +216,7 @@ impl<T: Eq + Clone> Lapper<T> {
                 min_start: local_low_start,
                 max_stop: local_high_stop,
                 start_index: clusters * counter,
-                stop_index: clusters * counter + clusters,
+                stop_index: clusters * counter + chunk.len(),
             });
             counter += 1;
         }
@@ -526,13 +529,15 @@ impl<T: Eq + Clone> Lapper<T> {
     /// ```
     #[inline]
     pub fn find(&self, start: usize, stop: usize) -> IterFind<T> {
+        let off = Self::lower_bound(
+            start.checked_sub(self.max_len).unwrap_or(0),
+            &self.intervals,
+        );
         IterFind {
             inner: self,
-            off: Self::lower_bound(
-                start.checked_sub(self.max_len).unwrap_or(0),
-                &self.intervals,
-            ),
+            off,
             end: self.intervals.len(),
+            clust_off: self.get_cluster(off),
             start,
             stop,
         }
@@ -572,6 +577,7 @@ impl<T: Eq + Clone> Lapper<T> {
         IterFind {
             inner: self,
             off: *cursor,
+            clust_off: self.get_cluster(*cursor),
             end: self.intervals.len(),
             start,
             stop,
@@ -587,6 +593,7 @@ where
 {
     inner: &'a Lapper<T>,
     off: usize,
+    clust_off: usize,
     end: usize,
     start: usize,
     stop: usize,
@@ -596,53 +603,36 @@ impl<'a, T: Eq + Clone> Iterator for IterFind<'a, T> {
     type Item = &'a Interval<T>;
 
     #[inline]
+    //self.start < stop && self.stop > start
     fn next(&mut self) -> Option<Self::Item> {
-        while self.off < self.inner.intervals.len() {
-            let interval = &self.inner.intervals[self.off];
-            self.off += 1;
-            if interval.overlap(self.start, self.stop) {
-                return Some(interval);
-            } else if interval.start >= self.stop {
-                break;
-            }
-            //let mut endit = false;
-            //loop {
-            //let cluster_index = self.inner.get_cluster(self.off);
-            //if let Some(cluster) = self.inner.index.get(cluster_index) {
-            //// check if cluster overlaps query at all
-            //// if not, skip to the end of the cluster
-            //if !cluster.min_start < self.stop && cluster.max_stop > self.start {
-            //if cluster_index + 1 < self.inner.index.len() {
-            //self.off = self.inner.index[cluster_index + 1].start_index;
-            //break;
-            //} else {
-            //endit = true;
-            //break;
-            //}
-            //} else {
-            //break;
-            //}
-            //} else {
-            //break;
-            //}
-            //}
-            //if endit {
-            //break;
-            //}
-            let cluster_index = self.inner.get_cluster(self.off);
-            if let Some(cluster) = self.inner.index.get(cluster_index) {
-                // check if cluster overlaps query at all
-                // if not, skip to the end of the cluster
-                if !cluster.min_start < self.stop && cluster.max_stop > self.start {
-                    if cluster_index + 1 < self.inner.index.len() {
-                        self.off = self.inner.index[cluster_index + 1].start_index;
-                    } else {
+        while self.clust_off < self.inner.index.len() {
+            let cluster = &self.inner.index[self.clust_off];
+            if self.start < cluster.max_stop && self.stop > cluster.min_start {
+                // There is at least one match in cluster
+                while self.off < cluster.stop_index {
+                    let interval = &self.inner.intervals[self.off];
+                    self.off += 1;
+                    if interval.overlap(self.start, self.stop) {
+                        return Some(interval);
+                    } else if interval.start >= self.stop {
+                        // no more matches in cluster
                         break;
                     }
                 }
             }
+            self.clust_off += 1;
         }
         None
+        //while self.off < self.inner.intervals.len() {
+        //let interval = &self.inner.intervals[self.off];
+        //self.off += 1;
+        //if interval.overlap(self.start, self.stop) {
+        //return Some(interval);
+        //} else if interval.start >= self.stop {
+        //break;
+        //}
+        //}
+        //None
     }
 }
 
