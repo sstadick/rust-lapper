@@ -94,6 +94,11 @@ pub struct Lapper<T: Eq + Clone> {
     pub intervals: Vec<Interval<T>>,
     /// The length of the longest interval
     max_len: usize,
+    /// The div number created by the universe that is the length of my intervals (see van emde
+    /// boas)
+    universe_div: usize,
+    /// An index of clusters of size sqrt(intervals.len()) as usize
+    index: Vec<Cluster>,
     /// A cursor to hold the position in the list in between searches with `seek` method
     cursor: usize,
     /// The calculated number of positions covered by the intervals
@@ -145,6 +150,15 @@ impl<T: Eq + Clone> PartialEq for Interval<T> {
     }
 }
 
+/// Index of my intervals, kind of like a van emde boas concept of a cluster
+#[derive(Debug)]
+struct Cluster {
+    min_start: usize,
+    max_stop: usize,
+    start_index: usize,
+    stop_index: usize,
+}
+
 impl<T: Eq + Clone> Lapper<T> {
     /// Create a new instance of Lapper by passing in a vector of Intervals. This vector will
     /// immediately be sorted by start order.
@@ -156,7 +170,11 @@ impl<T: Eq + Clone> Lapper<T> {
     /// let lapper = Lapper::new(data);
     /// ```
     pub fn new(mut intervals: Vec<Interval<T>>) -> Self {
+        // TODO: Check if they are sorted
+        // TODO: Switch to radix sort
         intervals.sort();
+        let interval_len = intervals.len();
+
         let mut max_len = 0;
         for interval in intervals.iter() {
             let i_len = interval.stop.checked_sub(interval.start).unwrap_or(0);
@@ -164,13 +182,48 @@ impl<T: Eq + Clone> Lapper<T> {
                 max_len = i_len;
             }
         }
+
+        // create index
+        let (universe_div, index) = Self::build_index(&intervals);
+
         Lapper {
             intervals,
+            universe_div,
+            index,
             max_len,
             cursor: 0,
             cov: None,
             overlaps_merged: false,
         }
+    }
+
+    /// Create the index based on a set of intervals
+    fn build_index(intervals: &Vec<Interval<T>>) -> (usize, Vec<Cluster>) {
+        let interval_len = intervals.len();
+        let clusters = (interval_len as f64).log2().floor() as usize + 1;
+        let mut index: Vec<Cluster> = Vec::with_capacity(interval_len / clusters + 1);
+        let mut counter = 0;
+        for chunk in intervals.chunks(clusters) {
+            let first = chunk.first().unwrap();
+            let local_low_start = first.start;
+            let local_high_stop = chunk
+                .iter()
+                .fold(first.stop, |high, x| std::cmp::max(high, x.stop));
+            index.push(Cluster {
+                min_start: local_low_start,
+                max_stop: local_high_stop,
+                start_index: clusters * counter,
+                stop_index: clusters * counter + clusters,
+            });
+            counter += 1;
+        }
+        ((interval_len as f64).sqrt().ceil() as usize, index)
+    }
+
+    /// Return the cluster number in which the key is present - see van emde boas 'high' function
+    #[inline]
+    fn get_cluster(&self, index: usize) -> usize {
+        index / self.universe_div
     }
 
     /// Get the number over intervals in Lapper
@@ -290,6 +343,9 @@ impl<T: Eq + Clone> Lapper<T> {
                 })
                 .collect();
         }
+        let (universe_div, index) = Self::build_index(&self.intervals);
+        self.universe_div = universe_div;
+        self.index = index;
     }
 
     /// Determine the first index that we should start checking for overlaps for via a binary
@@ -548,6 +604,42 @@ impl<'a, T: Eq + Clone> Iterator for IterFind<'a, T> {
                 return Some(interval);
             } else if interval.start >= self.stop {
                 break;
+            }
+            //let mut endit = false;
+            //loop {
+            //let cluster_index = self.inner.get_cluster(self.off);
+            //if let Some(cluster) = self.inner.index.get(cluster_index) {
+            //// check if cluster overlaps query at all
+            //// if not, skip to the end of the cluster
+            //if !cluster.min_start < self.stop && cluster.max_stop > self.start {
+            //if cluster_index + 1 < self.inner.index.len() {
+            //self.off = self.inner.index[cluster_index + 1].start_index;
+            //break;
+            //} else {
+            //endit = true;
+            //break;
+            //}
+            //} else {
+            //break;
+            //}
+            //} else {
+            //break;
+            //}
+            //}
+            //if endit {
+            //break;
+            //}
+            let cluster_index = self.inner.get_cluster(self.off);
+            if let Some(cluster) = self.inner.index.get(cluster_index) {
+                // check if cluster overlaps query at all
+                // if not, skip to the end of the cluster
+                if !cluster.min_start < self.stop && cluster.max_stop > self.start {
+                    if cluster_index + 1 < self.inner.index.len() {
+                        self.off = self.inner.index[cluster_index + 1].start_index;
+                    } else {
+                        break;
+                    }
+                }
             }
         }
         None
