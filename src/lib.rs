@@ -540,8 +540,11 @@ impl<'a, T: Eq + Clone> Iterator for IterFind<'a, T> {
     type Item = &'a Interval<T>;
 
     #[inline]
+    // interval.start < stop && interval.stop > start
     fn next(&mut self) -> Option<Self::Item> {
         while self.off < self.inner.intervals.len() {
+            //let mut generator = self.inner.intervals[self.off..].iter();
+            //while let Some(interval) = generator.next() {
             let interval = &self.inner.intervals[self.off];
             self.off += 1;
             if interval.overlap(self.start, self.stop) {

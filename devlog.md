@@ -1,3 +1,9 @@
+## 9/20/19
+- Maybe add max_ends list to the Lapper. Then binary search for upper
+  bounds like AIList does, and iterate backwards checking against the
+  max_end to deteremine overlap... It could make the hopper actually
+  work as well since binary searches in a local area would be useful
+
 ## 9/3/19
 - Added a worst case mode to allow for setting max misses and then
   recalculating the binary search from there. I think that for anything
