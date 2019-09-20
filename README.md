@@ -50,6 +50,7 @@ RustBio -l NestedInterval -n50000 -u100000
 ```
 
 Set A / b Creation Times
+
 |crate/method| A time| B time |
 |------------|---------| ------|
 |rust_lapper|15.625ms| 31.25ms| 
@@ -58,6 +59,7 @@ Set A / b Creation Times
 |bio|15.625ms| 31.25ms| 
 
 100% hit rate (A vs A)
+
 |crate/method|mean time| intersection | 
 |------------|---------| ------------ |
 |rust_lapper/find| 4.78125s | 1469068763 | 
@@ -73,7 +75,7 @@ Sub 100% hit rate (A vs B)
 |------------|---------| ------------ |
 |rust_lapper/find|531.25ms|176488436| 
 |rust_lapper/count|15.625ms|176488436 | 
-|scailist/find| 671.875ms|175515292 | 
+|scailist/find| 671.875ms|176488436 | 
 |nested_intervals/query_overlapping| 11.109375s|196090092|
 |bio/find|4.3125s|176488436| 
 
