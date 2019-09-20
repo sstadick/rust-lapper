@@ -2,6 +2,8 @@
 //! ## Features
 //! - Extremely fast on most genomic datasets. (3-4x faster than other methods)
 //! - Extremely fast on in order queries. (10x faster than other methods)
+//! - Extremely fast intersections count method based on the
+//! [BITS](https://arxiv.org/pdf/1208.3407.pdf) algorithm
 //! - Parallel friendly. Queries are on an immutable structure, even for seek
 //! - Consumer / Adapter paradigm, Iterators are returned and serve as the main API for interacting
 //! with the lapper
@@ -24,10 +26,9 @@
 //! ```
 //!
 //! Most interaction with this crate will be through the [`Lapper``](struct.Lapper.html)` struct
-//! The main methods are [`find`](struct.Lapper.html#method.find) and
-//! [`seek`](struct.Lapper.html#method.seek) where the latter uses a cursor and is very fast for
-//! cases when the queries are sorted. This is another innovation in this library that allows an
-//! additional ~50% speed improvement when consecutive queries are known to be in sort order.
+//! The main methods are [`find`](struct.Lapper.html#method.find),
+//! [`seek`](struct.Lapper.html#method.seek), and [`count`](struct.Lapper.html#method.count)
+//! where both `seek` and `count` are special cases allowing for very fast queries in certain scenarios.
 //!
 //! The overlap function for this assumes a zero based genomic coordinate system. So [start, stop)
 //! is not inclusive of the stop position for neither the queries, nor the Intervals.
@@ -43,7 +44,7 @@
 //! for the overlaps are > 5000 times faster.
 //!
 //! When this is not the case, if possible in your scenario, use merge_overlaps first, and then use
-//! find or seek.
+//! `find` or `seek`. The `count` method will be fast in all scenarios.
 //!
 //! # Examples
 //!
@@ -63,14 +64,14 @@
 //!    
 //!    // Demonstration of seek function. By passing in the &mut cursor, seek can have thread local
 //!    // cursors going
-//!    let mut sim: usize = 0;
+//!    let mut sim: u32= 0;
 //!    let mut cursor = 0;
 //!    // Calculate the overlap between the query and the found intervals, sum total overlap
 //!    for i in (0..10).step_by(3) {
 //!        sim += laps
 //!            .seek(i, i + 2, &mut cursor)
 //!            .map(|iv| cmp::min(i + 2, iv.stop) - cmp::max(i, iv.start))
-//!            .sum::<usize>();
+//!            .sum::<u32>();
 //!    }
 //!    assert_eq!(sim, 4);
 //! ```
@@ -81,8 +82,8 @@ use std::collections::VecDeque;
 /// Inclusive start, exclusive of stop
 #[derive(Eq, Debug, Clone)]
 pub struct Interval<T: Eq + Clone> {
-    pub start: usize,
-    pub stop: usize,
+    pub start: u32,
+    pub stop: u32,
     pub val: T,
 }
 
@@ -92,12 +93,16 @@ pub struct Interval<T: Eq + Clone> {
 pub struct Lapper<T: Eq + Clone> {
     /// List of intervasl
     pub intervals: Vec<Interval<T>>,
+    /// Sorted list of start positions,
+    starts: Vec<u32>,
+    /// Sorted list of end positions,
+    stops: Vec<u32>,
     /// The length of the longest interval
-    max_len: usize,
+    max_len: u32,
     /// A cursor to hold the position in the list in between searches with `seek` method
     cursor: usize,
     /// The calculated number of positions covered by the intervals
-    cov: Option<usize>,
+    cov: Option<u32>,
     /// Whether or not overlaps have been merged
     pub overlaps_merged: bool,
 }
@@ -105,7 +110,7 @@ pub struct Lapper<T: Eq + Clone> {
 impl<T: Eq + Clone> Interval<T> {
     /// Compute the intsect between two intervals
     #[inline]
-    pub fn intersect(&self, other: &Interval<T>) -> usize {
+    pub fn intersect(&self, other: &Interval<T>) -> u32 {
         std::cmp::min(self.stop, other.stop)
             .checked_sub(std::cmp::max(self.start, other.start))
             .unwrap_or(0)
@@ -113,7 +118,7 @@ impl<T: Eq + Clone> Interval<T> {
 
     /// Check if two intervals overlap
     #[inline]
-    pub fn overlap(&self, start: usize, stop: usize) -> bool {
+    pub fn overlap(&self, start: u32, stop: u32) -> bool {
         self.start < stop && self.stop > start
     }
 }
@@ -157,6 +162,10 @@ impl<T: Eq + Clone> Lapper<T> {
     /// ```
     pub fn new(mut intervals: Vec<Interval<T>>) -> Self {
         intervals.sort();
+        let (mut starts, mut stops): (Vec<_>, Vec<_>) =
+            intervals.iter().map(|x| (x.start, x.stop)).unzip();
+        starts.sort();
+        stops.sort();
         let mut max_len = 0;
         for interval in intervals.iter() {
             let i_len = interval.stop.checked_sub(interval.start).unwrap_or(0);
@@ -166,6 +175,8 @@ impl<T: Eq + Clone> Lapper<T> {
         }
         Lapper {
             intervals,
+            starts,
+            stops,
             max_len,
             cursor: 0,
             cov: None,
@@ -209,7 +220,7 @@ impl<T: Eq + Clone> Lapper<T> {
     /// let lapper = Lapper::new(data);
     /// assert_eq!(lapper.cov(), 25);
     #[inline]
-    pub fn cov(&self) -> usize {
+    pub fn cov(&self) -> u32 {
         match self.cov {
             None => self.calculate_coverage(),
             Some(cov) => cov,
@@ -218,14 +229,14 @@ impl<T: Eq + Clone> Lapper<T> {
 
     /// Get the number fo positions covered by the intervals in Lapper and store it. If you are
     /// going to be using the coverage, you should set it to avoid calculating it over and over.
-    pub fn set_cov(&mut self) -> usize {
+    pub fn set_cov(&mut self) -> u32 {
         let cov = self.calculate_coverage();
         self.cov = Some(cov);
         cov
     }
 
     /// Calculate teh actual coverage behind the scenes.
-    fn calculate_coverage(&self) -> usize {
+    fn calculate_coverage(&self) -> u32 {
         let mut moving_interval = Interval {
             start: 0,
             stop: 0,
@@ -295,7 +306,7 @@ impl<T: Eq + Clone> Lapper<T> {
     /// Determine the first index that we should start checking for overlaps for via a binary
     /// search.
     #[inline]
-    pub fn lower_bound(start: usize, intervals: &[Interval<T>]) -> usize {
+    pub fn lower_bound(start: u32, intervals: &[Interval<T>]) -> usize {
         let mut size = intervals.len();
         let mut low = 0;
 
@@ -311,22 +322,32 @@ impl<T: Eq + Clone> Lapper<T> {
         low
     }
 
-    //#[inline]
-    //fn lower_bound(&self, start: usize) -> usize {
-    //let mut size = self.intervals.len();
-    //let mut low = 0;
+    #[inline]
+    pub fn bsearch_seq(key: u32, elems: &[u32]) -> usize {
+        //let mut size = elems.len();
+        let mut high = elems.len();
+        let mut low = 0;
 
-    //while size > 0 {
-    //let half = size / 2;
-    //let other_half = size - half;
-    //let probe = low + half;
-    //let other_low = low + other_half;
-    //let v = &self.intervals[probe];
-    //size = half;
-    //low = if v.start < start { other_low } else { low }
-    //}
-    //low
-    //}
+        while high - low > 1 {
+            let mid = (high + low) / 2;
+            if elems[mid] < key {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        high
+        //while size > 0 {
+        //let half = size / 2;
+        //let other_half = size - half;
+        //let probe = low + half;
+        //let other_low = low + other_half;
+        //let v = &elems[probe];
+        //size = half;
+        //low = if *v < key { other_low } else { low }
+        //}
+        //low
+    }
 
     /// Find the union and the intersect of two lapper objects.
     /// Union: The set of positions found in both lappers
@@ -373,7 +394,7 @@ impl<T: Eq + Clone> Lapper<T> {
     /// assert_eq!(union, 73);
     /// ```
     #[inline]
-    pub fn union_and_intersect(&self, other: &Self) -> (usize, usize) {
+    pub fn union_and_intersect(&self, other: &Self) -> (u32, u32) {
         let mut cursor: usize = 0;
 
         if !self.overlaps_merged || !other.overlaps_merged {
@@ -411,13 +432,13 @@ impl<T: Eq + Clone> Lapper<T> {
     /// Intersect: The number of positions where both lappers intersect. Note that a position only
     /// counts one time, multiple Intervals covering the same position don't add up
     #[inline]
-    pub fn intersect(&self, other: &Self) -> usize {
+    pub fn intersect(&self, other: &Self) -> u32 {
         self.union_and_intersect(other).1
     }
 
     /// Find the union of two lapper objects.
     #[inline]
-    pub fn union(&self, other: &Self) -> usize {
+    pub fn union(&self, other: &Self) -> u32 {
         self.union_and_intersect(other).0
     }
 
@@ -460,6 +481,32 @@ impl<T: Eq + Clone> Lapper<T> {
         }
     }
 
+    /// Count all intervals that overlap start .. stop. This performs two binary search in order to
+    /// find all the excluded elements, and then deduces the intersection from there. See
+    /// [BITS](https://arxiv.org/pdf/1208.3407.pdf) for more details.
+    /// ```
+    /// use rust_lapper::{Lapper, Interval};
+    /// let lapper = Lapper::new((0..100).step_by(5)
+    ///                                 .map(|x| Interval{start: x, stop: x+2 , val: true})
+    ///                                 .collect::<Vec<Interval<bool>>>());
+    /// assert_eq!(lapper.count(5, 11), 2);
+    /// ```
+    #[inline]
+    pub fn count(&self, start: u32, stop: u32) -> u32 {
+        let len = self.intervals.len();
+        let mut first = Self::bsearch_seq(start, &self.stops);
+        let mut last = Self::bsearch_seq(stop, &self.starts);
+        while last < len && self.starts[last] == stop {
+            last += 1;
+        }
+        while first < len && self.stops[first] == start {
+            first += 1;
+        }
+        let num_cant_after = len - last;
+        let result = len - first - num_cant_after;
+        result as u32
+    }
+
     /// Find all intervals that overlap start .. stop
     /// ```
     /// use rust_lapper::{Lapper, Interval};
@@ -469,7 +516,7 @@ impl<T: Eq + Clone> Lapper<T> {
     /// assert_eq!(lapper.find(5, 11).count(), 2);
     /// ```
     #[inline]
-    pub fn find(&self, start: usize, stop: usize) -> IterFind<T> {
+    pub fn find(&self, start: u32, stop: u32) -> IterFind<T> {
         IterFind {
             inner: self,
             off: Self::lower_bound(
@@ -498,7 +545,7 @@ impl<T: Eq + Clone> Lapper<T> {
     /// }
     /// ```
     #[inline]
-    pub fn seek<'a>(&'a self, start: usize, stop: usize, cursor: &mut usize) -> IterFind<'a, T> {
+    pub fn seek<'a>(&'a self, start: u32, stop: u32, cursor: &mut usize) -> IterFind<'a, T> {
         if *cursor == 0 || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
         {
             *cursor = Self::lower_bound(
@@ -532,8 +579,8 @@ where
     inner: &'a Lapper<T>,
     off: usize,
     end: usize,
-    start: usize,
-    stop: usize,
+    start: u32,
+    stop: u32,
 }
 
 impl<'a, T: Eq + Clone> Iterator for IterFind<'a, T> {
@@ -564,11 +611,11 @@ where
     T: Eq + Clone + 'a,
 {
     inner: &'a Lapper<T>,
-    merged: Lapper<bool>,   // A lapper that is the merged_lapper of inner
-    curr_merged_pos: usize, // Current start position in current interval
-    curr_pos: usize,        // In merged list of non-overlapping intervals
-    cursor: usize,          // cursor for seek over inner lapper
-    end: usize,             // len of merged
+    merged: Lapper<bool>, // A lapper that is the merged_lapper of inner
+    curr_merged_pos: u32, // Current start position in current interval
+    curr_pos: usize,      // In merged list of non-overlapping intervals
+    cursor: usize,        // cursor for seek over inner lapper
+    end: usize,           // len of merged
 }
 
 impl<'a, T: Eq + Clone> Iterator for IterDepth<'a, T> {
@@ -815,6 +862,7 @@ mod tests {
             vec![&e1, &e2],
             lapper.seek(8, 20, &mut cursor).collect::<Vec<&Iv>>()
         );
+        assert_eq!(lapper.count(8, 20), 2);
     }
 
     #[test]
@@ -932,6 +980,7 @@ mod tests {
             &Iv{start: 9, stop: 11, val: 0},
             &Iv{start: 10, stop: 13, val: 0},
         ]);
+        assert_eq!(lapper.count(8, 11), 3);
         let found = lapper.find(145, 151).collect::<Vec<&Iv>>();
         assert_eq!(found, vec![
             &Iv{start: 100, stop: 200, val: 0},
@@ -939,6 +988,7 @@ mod tests {
             &Iv{start: 150, stop: 200, val: 0},
         ]);
 
+        assert_eq!(lapper.count(145, 151), 3);
     }
 
     #[test]
@@ -1045,7 +1095,7 @@ mod tests {
         let found = lapper.find(28974798, 33141355).collect::<Vec<&Iv>>();
         assert_eq!(found, vec![
             &Iv{start:28866309, stop: 33141404	, val: 0},
-        ])
-
+        ]);
+        assert_eq!(lapper.count(28974798, 33141355), 1);
     }
 }

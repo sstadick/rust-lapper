@@ -12,16 +12,30 @@ This is a rust port of Brent Pendersen's
 differences, mostly that the find and seek methods both return
 iterators, so all adaptor methods may be used normally.
 
-This crate works well for interval data that does not include very long
-intervals that engulf a majority of other intervals. In comparisons against
-other intervals trees, it is twice as slow in the worst case scenario of an
-interval spanning the whole set of possible positions.
+This crate works well for most interval data that does not include very long
+intervals that engulf a majority of other intervals. It is still fairly
+comporable to other methods, even in it's worst case. See benchmarks
+below. If you absolutely need more guarentees around worst case I would
+recommend [AIList](https://github.com/sstadick/AIList) which handles
+large overlaps better at the cost of most normal cases.
 
 However, on more typical datasets, this crate is between 4-10x faster
 than other interval overlap methods.
 
+It should also be noted that the `count` method is agnostic to data
+type, and should be about as fast as it is possible to be on any
+dataset.
+
 ## Benchmarks
 
+Benchmarking interval tree-ish datastructures is hard
+Please see the
+[interval_bakeoff](https://github.com/sstadick/interval_bakeoff) project
+for details on how the benchmarks were run... It's not fully baked yet
+though.
+
+
+TODO: Not updated yet, count is overcounting
 Benchmarks performed on a sub 100% hit rate dataset:
 
 |crate/method|mean time|
