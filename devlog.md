@@ -1,3 +1,9 @@
+## 9/20/19
+- Tried messing with a few different ways of doing things, but
+  essentially we are hamstrung by the max_len always hanging around.
+  need to figure out how to bin search in each cluster I think, and not
+  have to subtract max_len each time. overall it holds it's own, just a
+  second or two slower.
 ## 9/3/19
 - Added a worst case mode to allow for setting max misses and then
   recalculating the binary search from there. I think that for anything

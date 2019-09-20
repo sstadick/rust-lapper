@@ -23,16 +23,16 @@
 //! Answer: ((0,10], (5,9], (8,11])
 //! ```
 //!
-//! Most interaction with this crate will be through the [`Lapper``](struct.Lapper.html)` struct
-//! The main methods are [`find`](struct.Lapper.html#method.find) and
-//! [`seek`](struct.Lapper.html#method.seek) where the latter uses a cursor and is very fast for
+//! Most interaction with this crate will be through the [`Hopper``](struct.Hopper.html)` struct
+//! The main methods are [`find`](struct.Hopper.html#method.find) and
+//! [`seek`](struct.Hopper.html#method.seek) where the latter uses a cursor and is very fast for
 //! cases when the queries are sorted. This is another innovation in this library that allows an
 //! additional ~50% speed improvement when consecutive queries are known to be in sort order.
 //!
 //! The overlap function for this assumes a zero based genomic coordinate system. So [start, stop)
 //! is not inclusive of the stop position for neither the queries, nor the Intervals.
 //!
-//! Lapper does not use an interval tree, instead, it operates on the assumtion that most intervals are
+//! Hopper does not use an interval tree, instead, it operates on the assumtion that most intervals are
 //! of similar length; or, more exactly, that the longest interval in the set is not long compred to
 //! the average distance between intervals.
 //!
@@ -48,7 +48,7 @@
 //! # Examples
 //!
 //! ```rust
-//!    use rust_lapper::{Interval, Lapper};
+//!    use rust_hopper::{Interval, Hopper};
 //!    use std::cmp;
 //!    type Iv = Interval<u32>;
 //!
@@ -57,7 +57,7 @@
 //!    println!("{:#?}", data);
 //!
 //!    // make lapper structure
-//!    let laps = Lapper::new(data);
+//!    let laps = Hopper::new(data);
 //!
 //!    assert_eq!(laps.find(6, 11).next(), Some(&Iv{start: 5, stop: 7, val: 0}));
 //!    
@@ -89,7 +89,7 @@ pub struct Interval<T: Eq + Clone> {
 /// Primary object of the library. The public intervals holds all the intervals and can be used for
 /// iterating / pulling values out of the tree.
 #[derive(Debug)]
-pub struct Lapper<T: Eq + Clone> {
+pub struct Hopper<T: Eq + Clone> {
     /// List of intervasl
     pub intervals: Vec<Interval<T>>,
     /// The length of the longest interval
@@ -163,15 +163,15 @@ struct Cluster {
     stop_index: usize,
 }
 
-impl<T: Eq + Clone> Lapper<T> {
-    /// Create a new instance of Lapper by passing in a vector of Intervals. This vector will
+impl<T: Eq + Clone> Hopper<T> {
+    /// Create a new instance of Hopper by passing in a vector of Intervals. This vector will
     /// immediately be sorted by start order.
     /// ```
-    /// use rust_lapper::{Lapper, Interval};
+    /// use rust_hopper::{Hopper, Interval};
     /// let data = (0..20).step_by(5)
     ///                   .map(|x| Interval{start: x, stop: x + 10, val: true})
     ///                   .collect::<Vec<Interval<bool>>>();
-    /// let lapper = Lapper::new(data);
+    /// let lapper = Hopper::new(data);
     /// ```
     pub fn new(mut intervals: Vec<Interval<T>>) -> Self {
         // TODO: Check if they are sorted
@@ -189,7 +189,7 @@ impl<T: Eq + Clone> Lapper<T> {
         // create index
         let (universe_div, index) = Self::build_index(&intervals);
 
-        Lapper {
+        Hopper {
             intervals,
             universe_div,
             index,
@@ -229,13 +229,13 @@ impl<T: Eq + Clone> Lapper<T> {
         index / self.universe_div
     }
 
-    /// Get the number over intervals in Lapper
+    /// Get the number over intervals in Hopper
     /// ```
-    /// use rust_lapper::{Lapper, Interval};
+    /// use rust_hopper::{Hopper, Interval};
     /// let data = (0..20).step_by(5)
     ///                   .map(|x| Interval{start: x, stop: x + 10, val: true})
     ///                   .collect::<Vec<Interval<bool>>>();
-    /// let lapper = Lapper::new(data);
+    /// let lapper = Hopper::new(data);
     /// assert_eq!(lapper.len(), 4);
     /// ```
     #[inline]
@@ -245,9 +245,9 @@ impl<T: Eq + Clone> Lapper<T> {
 
     /// Check if lapper is empty
     /// ```
-    /// use rust_lapper::{Lapper, Interval};
+    /// use rust_hopper::{Hopper, Interval};
     /// let data: Vec<Interval<bool>> = vec![];
-    /// let lapper = Lapper::new(data);
+    /// let lapper = Hopper::new(data);
     /// assert_eq!(lapper.is_empty(), true);
     /// ```
     #[inline]
@@ -255,14 +255,14 @@ impl<T: Eq + Clone> Lapper<T> {
         self.intervals.is_empty()
     }
 
-    /// Get the number of positions covered by the intervals in Lapper. This provides immutable
+    /// Get the number of positions covered by the intervals in Hopper. This provides immutable
     /// access if it has already been set, or on the fly calculation.
     /// ```
-    /// use rust_lapper::{Lapper, Interval};
+    /// use rust_hopper::{Hopper, Interval};
     /// let data = (0..20).step_by(5)
     ///                   .map(|x| Interval{start: x, stop: x + 10, val: true})
     ///                   .collect::<Vec<Interval<bool>>>();
-    /// let lapper = Lapper::new(data);
+    /// let lapper = Hopper::new(data);
     /// assert_eq!(lapper.cov(), 25);
     #[inline]
     pub fn cov(&self) -> usize {
@@ -272,7 +272,7 @@ impl<T: Eq + Clone> Lapper<T> {
         }
     }
 
-    /// Get the number fo positions covered by the intervals in Lapper and store it. If you are
+    /// Get the number fo positions covered by the intervals in Hopper and store it. If you are
     /// going to be using the coverage, you should set it to avoid calculating it over and over.
     pub fn set_cov(&mut self) -> usize {
         let cov = self.calculate_coverage();
@@ -306,16 +306,16 @@ impl<T: Eq + Clone> Lapper<T> {
         cov
     }
 
-    /// Return an iterator over the intervals in Lapper
+    /// Return an iterator over the intervals in Hopper
     #[inline]
-    pub fn iter(&self) -> IterLapper<T> {
-        IterLapper {
+    pub fn iter(&self) -> IterHopper<T> {
+        IterHopper {
             inner: self,
             pos: 0,
         }
     }
 
-    /// Merge any intervals that overlap with eachother within the Lapper. This is an easy way to
+    /// Merge any intervals that overlap with eachother within the Hopper. This is an easy way to
     /// speed up queries.
     pub fn merge_overlaps(&mut self) {
         let mut stack: VecDeque<&mut Interval<T>> = VecDeque::new();
@@ -370,29 +370,12 @@ impl<T: Eq + Clone> Lapper<T> {
         low
     }
 
-    //#[inline]
-    //fn lower_bound(&self, start: usize) -> usize {
-    //let mut size = self.intervals.len();
-    //let mut low = 0;
-
-    //while size > 0 {
-    //let half = size / 2;
-    //let other_half = size - half;
-    //let probe = low + half;
-    //let other_low = low + other_half;
-    //let v = &self.intervals[probe];
-    //size = half;
-    //low = if v.start < start { other_low } else { low }
-    //}
-    //low
-    //}
-
     /// Find the union and the intersect of two lapper objects.
     /// Union: The set of positions found in both lappers
     /// Intersect: The number of positions where both lappers intersect. Note that a position only
     /// counts one time, multiple Intervals covering the same position don't add up.
     /// ``` rust
-    /// use rust_lapper::{Lapper, Interval};
+    /// use rust_hopper::{Hopper, Interval};
     /// type Iv = Interval<u32>;
     /// let data1: Vec<Iv> = vec![
     ///     Iv{start: 70, stop: 120, val: 0}, // max_len = 50
@@ -410,7 +393,7 @@ impl<T: Eq + Clone> Lapper<T> {
     ///     Iv{start: 70, stop: 75, val: 0},
     /// ];
     ///
-    /// let (mut lapper1, mut lapper2) = (Lapper::new(data1), Lapper::new(data2)) ;
+    /// let (mut lapper1, mut lapper2) = (Hopper::new(data1), Hopper::new(data2)) ;
     /// // Should be the same either way it's calculated
     /// let (union, intersect) = lapper1.union_and_intersect(&lapper2);
     /// assert_eq!(intersect, 10);
@@ -448,7 +431,7 @@ impl<T: Eq + Clone> Lapper<T> {
                     });
                 }
             }
-            let mut temp_lapper = Lapper::new(intersections);
+            let mut temp_lapper = Hopper::new(intersections);
             temp_lapper.merge_overlaps();
             temp_lapper.set_cov();
             let union = self.cov() + other.cov() - temp_lapper.cov();
@@ -485,11 +468,11 @@ impl<T: Eq + Clone> Lapper<T> {
     ///
     /// # Examples
     /// ```
-    /// use rust_lapper::{Lapper, Interval};
+    /// use rust_hopper::{Hopper, Interval};
     /// let data = (0..20).step_by(5)
     ///                   .map(|x| Interval{start: x, stop: x + 10, val: true})
     ///                   .collect::<Vec<Interval<bool>>>();
-    /// let lapper = Lapper::new(data);
+    /// let lapper = Hopper::new(data);
     /// assert_eq!(lapper.depth().collect::<Vec<Interval<u32>>>(), vec![
     ///             Interval { start: 0, stop: 5, val: 1 },
     ///             Interval { start: 5, stop: 20, val: 2 },
@@ -497,7 +480,7 @@ impl<T: Eq + Clone> Lapper<T> {
     /// ```
     #[inline]
     pub fn depth(&self) -> IterDepth<T> {
-        let mut merged_lapper = Lapper::new(
+        let mut merged_lapper = Hopper::new(
             self.intervals
                 .iter()
                 .map(|i| Interval {
@@ -521,8 +504,8 @@ impl<T: Eq + Clone> Lapper<T> {
 
     /// Find all intervals that overlap start .. stop
     /// ```
-    /// use rust_lapper::{Lapper, Interval};
-    /// let lapper = Lapper::new((0..100).step_by(5)
+    /// use rust_hopper::{Hopper, Interval};
+    /// let lapper = Hopper::new((0..100).step_by(5)
     ///                                 .map(|x| Interval{start: x, stop: x+2 , val: true})
     ///                                 .collect::<Vec<Interval<bool>>>());
     /// assert_eq!(lapper.find(5, 11).count(), 2);
@@ -549,8 +532,8 @@ impl<T: Eq + Clone> Lapper<T> {
     /// be modified and should be reused in the next query. This allows seek to not need to make
     /// the lapper object mutable, and thus use the same lapper accross threads.
     /// ```
-    /// use rust_lapper::{Lapper, Interval};
-    /// let lapper = Lapper::new((0..100).step_by(5)
+    /// use rust_hopper::{Hopper, Interval};
+    /// let lapper = Hopper::new((0..100).step_by(5)
     ///                                 .map(|x| Interval{start: x, stop: x+2 , val: true})
     ///                                 .collect::<Vec<Interval<bool>>>());
     /// let mut cursor = 0;
@@ -591,7 +574,9 @@ pub struct IterFind<'a, T>
 where
     T: Eq + Clone + 'a,
 {
-    inner: &'a Lapper<T>,
+    curr: usize,
+    results: Vec<&'a Interval<T>>,
+    inner: &'a Hopper<T>,
     off: usize,
     clust_off: usize,
     end: usize,
@@ -605,24 +590,30 @@ impl<'a, T: Eq + Clone> Iterator for IterFind<'a, T> {
     #[inline]
     //self.start < stop && self.stop > start
     fn next(&mut self) -> Option<Self::Item> {
-        while self.clust_off < self.inner.index.len() {
+        'index: while self.clust_off < self.inner.index.len() {
             let cluster = &self.inner.index[self.clust_off];
             if self.start < cluster.max_stop && self.stop > cluster.min_start {
                 // There is at least one match in cluster
-                while self.off < cluster.stop_index {
+                if self.off < cluster.start_index {
+                    self.off = cluster.start_index;
+                }
+                'cluster: while self.off < cluster.stop_index {
                     let interval = &self.inner.intervals[self.off];
                     self.off += 1;
                     if interval.overlap(self.start, self.stop) {
                         return Some(interval);
                     } else if interval.start >= self.stop {
-                        // no more matches in cluster
-                        break;
+                        // no more matches in cluster ... anywhere
+                        break 'index;
                     }
                 }
+            } else if cluster.min_start >= self.stop {
+                break 'index;
             }
             self.clust_off += 1;
         }
         None
+
         //while self.off < self.inner.intervals.len() {
         //let interval = &self.inner.intervals[self.off];
         //self.off += 1;
@@ -642,8 +633,8 @@ pub struct IterDepth<'a, T>
 where
     T: Eq + Clone + 'a,
 {
-    inner: &'a Lapper<T>,
-    merged: Lapper<bool>,   // A lapper that is the merged_lapper of inner
+    inner: &'a Hopper<T>,
+    merged: Hopper<bool>,   // A lapper that is the merged_lapper of inner
     curr_merged_pos: usize, // Current start position in current interval
     curr_pos: usize,        // In merged list of non-overlapping intervals
     cursor: usize,          // cursor for seek over inner lapper
@@ -696,16 +687,16 @@ impl<'a, T: Eq + Clone> Iterator for IterDepth<'a, T> {
         })
     }
 }
-/// Lapper Iterator
-pub struct IterLapper<'a, T>
+/// Hopper Iterator
+pub struct IterHopper<'a, T>
 where
     T: Eq + Clone + 'a,
 {
-    inner: &'a Lapper<T>,
+    inner: &'a Hopper<T>,
     pos: usize,
 }
 
-impl<'a, T: Eq + Clone> Iterator for IterLapper<'a, T> {
+impl<'a, T: Eq + Clone> Iterator for IterHopper<'a, T> {
     type Item = &'a Interval<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -718,7 +709,7 @@ impl<'a, T: Eq + Clone> Iterator for IterLapper<'a, T> {
     }
 }
 
-impl<T: Eq + Clone> IntoIterator for Lapper<T> {
+impl<T: Eq + Clone> IntoIterator for Hopper<T> {
     type Item = Interval<T>;
     type IntoIter = ::std::vec::IntoIter<Self::Item>;
 
@@ -727,7 +718,7 @@ impl<T: Eq + Clone> IntoIterator for Lapper<T> {
     }
 }
 
-impl<'a, T: Eq + Clone> IntoIterator for &'a Lapper<T> {
+impl<'a, T: Eq + Clone> IntoIterator for &'a Hopper<T> {
     type Item = &'a Interval<T>;
     type IntoIter = std::slice::Iter<'a, Interval<T>>;
 
@@ -736,7 +727,7 @@ impl<'a, T: Eq + Clone> IntoIterator for &'a Lapper<T> {
     }
 }
 
-impl<'a, T: Eq + Clone> IntoIterator for &'a mut Lapper<T> {
+impl<'a, T: Eq + Clone> IntoIterator for &'a mut Hopper<T> {
     type Item = &'a mut Interval<T>;
     type IntoIter = std::slice::IterMut<'a, Interval<T>>;
 
@@ -751,7 +742,7 @@ mod tests {
     use super::*;
 
     type Iv = Interval<u32>;
-    fn setup_nonoverlapping() -> Lapper<u32> {
+    fn setup_nonoverlapping() -> Hopper<u32> {
         let data: Vec<Iv> = (0..100)
             .step_by(20)
             .map(|x| Iv {
@@ -760,10 +751,10 @@ mod tests {
                 val: 0,
             })
             .collect();
-        let lapper = Lapper::new(data);
+        let lapper = Hopper::new(data);
         lapper
     }
-    fn setup_overlapping() -> Lapper<u32> {
+    fn setup_overlapping() -> Hopper<u32> {
         let data: Vec<Iv> = (0..100)
             .step_by(10)
             .map(|x| Iv {
@@ -772,10 +763,10 @@ mod tests {
                 val: 0,
             })
             .collect();
-        let lapper = Lapper::new(data);
+        let lapper = Hopper::new(data);
         lapper
     }
-    fn setup_badlapper() -> Lapper<u32> {
+    fn setup_badlapper() -> Hopper<u32> {
         let data: Vec<Iv> = vec![
             Iv{start: 70, stop: 120, val: 0}, // max_len = 50
             Iv{start: 10, stop: 15, val: 0},
@@ -788,16 +779,16 @@ mod tests {
             Iv{start: 68, stop: 71, val: 0}, // overlap start
             Iv{start: 70, stop: 75, val: 0},
         ];
-        let lapper = Lapper::new(data);
+        let lapper = Hopper::new(data);
         lapper
     }
-    fn setup_single() -> Lapper<u32> {
+    fn setup_single() -> Hopper<u32> {
         let data: Vec<Iv> = vec![Iv {
             start: 10,
             stop: 35,
             val: 0,
         }];
-        let lapper = Lapper::new(data);
+        let lapper = Hopper::new(data);
         lapper
     }
 
@@ -964,7 +955,7 @@ mod tests {
             Iv{start: 70, stop: 75, val: 0},
         ];
         
-        let (mut lapper1, mut lapper2) = (Lapper::new(data1), Lapper::new(data2)) ;
+        let (mut lapper1, mut lapper2) = (Hopper::new(data1), Hopper::new(data2)) ;
         // Should be the same either way it's calculated
         let (union, intersect) = lapper1.union_and_intersect(&lapper2);
         assert_eq!(intersect, 10);
@@ -1004,7 +995,7 @@ mod tests {
             Iv{start: 111, stop: 160, val: 0},
             Iv{start: 150, stop: 200, val: 0},
         ];
-        let lapper = Lapper::new(data1);
+        let lapper = Hopper::new(data1);
         let found = lapper.find(8, 11).collect::<Vec<&Iv>>();
         assert_eq!(found, vec![
             &Iv{start: 1, stop: 10, val: 0}, 
@@ -1026,7 +1017,7 @@ mod tests {
             Iv{start: 0, stop: 10, val: 0},
             Iv{start: 5, stop: 10, val: 0}
         ];
-        let lapper = Lapper::new(data1);
+        let lapper = Hopper::new(data1);
         let found = lapper.depth().collect::<Vec<Interval<u32>>>();
         assert_eq!(found, vec![
                    Interval{start: 0, stop: 5, val: 1},
@@ -1045,7 +1036,7 @@ mod tests {
             Iv{start: 5, stop: 8, val: 0},
             Iv{start: 9, stop: 11, val: 0},
         ];
-        let lapper = Lapper::new(data1);
+        let lapper = Hopper::new(data1);
         let found = lapper.depth().collect::<Vec<Interval<u32>>>();
         assert_eq!(found, vec![
                    Interval{start: 1, stop: 2, val: 1},
@@ -1068,7 +1059,7 @@ mod tests {
             Iv{start: 9, stop: 11, val: 0},
             Iv{start: 15, stop: 20, val: 0},
         ];
-        let lapper = Lapper::new(data1);
+        let lapper = Hopper::new(data1);
         let found = lapper.depth().collect::<Vec<Interval<u32>>>();
         assert_eq!(found, vec![
                    Interval{start: 1, stop: 2, val: 1},
@@ -1119,7 +1110,7 @@ mod tests {
             Iv{start:27959118, stop: 27959171	, val: 0},
             Iv{start:28866309, stop: 33141404	, val: 0},
         ];
-        let lapper = Lapper::new(data);
+        let lapper = Hopper::new(data);
 
         let found = lapper.find(28974798, 33141355).collect::<Vec<&Iv>>();
         assert_eq!(found, vec![

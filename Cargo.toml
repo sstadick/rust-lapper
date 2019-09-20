@@ -1,5 +1,5 @@
 [package]
-name = "rust-lapper"
+name = "rust-hopper"
 version = "0.3.9"
 authors = ["Seth Stadick <sstadick@gmail.com>"]
 edition = "2018"

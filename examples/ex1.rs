@@ -1,4 +1,4 @@
-use rust_lapper::{Interval, Lapper};
+use rust_hopper::{Hopper, Interval};
 
 type Iv = Interval<u32>;
 fn main() {
@@ -57,7 +57,7 @@ fn main() {
     ];
 
     // make lapper structure
-    let mut lapper = Lapper::new(data);
+    let mut lapper = Hopper::new(data);
 
     // Iterator based find to extract all intervals that overlap 6..7
     // If your queries are coming in start sorted order, use the seek method to retain a cursor for
@@ -116,7 +116,7 @@ fn main() {
             val: 0,
         },
     ];
-    let (union, intersect) = lapper.union_and_intersect(&Lapper::new(data));
+    let (union, intersect) = lapper.union_and_intersect(&Hopper::new(data));
     assert_eq!(union, 88);
     assert_eq!(intersect, 27);
 
