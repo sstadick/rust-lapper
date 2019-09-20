@@ -324,7 +324,9 @@ impl<T: Eq + Clone> Lapper<T> {
 
     #[inline]
     pub fn bsearch_seq(key: u32, elems: &[u32]) -> usize {
-        //let mut size = elems.len();
+        if elems[0] > key {
+            return 0;
+        }
         let mut high = elems.len();
         let mut low = 0;
 
@@ -337,16 +339,6 @@ impl<T: Eq + Clone> Lapper<T> {
             }
         }
         high
-        //while size > 0 {
-        //let half = size / 2;
-        //let other_half = size - half;
-        //let probe = low + half;
-        //let other_low = low + other_half;
-        //let v = &elems[probe];
-        //size = half;
-        //low = if *v < key { other_low } else { low }
-        //}
-        //low
     }
 
     /// Find the union and the intersect of two lapper objects.
@@ -492,19 +484,26 @@ impl<T: Eq + Clone> Lapper<T> {
     /// assert_eq!(lapper.count(5, 11), 2);
     /// ```
     #[inline]
-    pub fn count(&self, start: u32, stop: u32) -> u32 {
+    pub fn count(&self, start: u32, stop: u32) -> usize {
         let len = self.intervals.len();
         let mut first = Self::bsearch_seq(start, &self.stops);
         let mut last = Self::bsearch_seq(stop, &self.starts);
-        while last < len && self.starts[last] == stop {
-            last += 1;
-        }
+        //println!("{}/{}", start, stop);
+        //println!("pre start found in stops: {}: {}", first, self.stops[first]);
+        //println!("pre stop found in starts: {}", last);
+        //while last < len && self.starts[last] == stop {
+        //last += 1;
+        //}
         while first < len && self.stops[first] == start {
             first += 1;
         }
         let num_cant_after = len - last;
         let result = len - first - num_cant_after;
-        result as u32
+        //println!("{:#?}", self.starts);
+        //println!("{:#?}", self.stops);
+        //println!("start found in stops: {}", first);
+        //println!("stop found in starts: {}", last);
+        result
     }
 
     /// Find all intervals that overlap start .. stop
@@ -775,7 +774,8 @@ mod tests {
         let lapper = setup_nonoverlapping();
         let mut cursor = 0;
         assert_eq!(None, lapper.find(15, 20).next());
-        assert_eq!(None, lapper.seek(15, 20, &mut cursor).next())
+        assert_eq!(None, lapper.seek(15, 20, &mut cursor).next());
+        assert_eq!(lapper.find(15, 20).count(), lapper.count(15, 20));
     }
 
     // Test that a query start that hits an interval end returns no interval
@@ -784,7 +784,8 @@ mod tests {
         let lapper = setup_nonoverlapping();
         let mut cursor = 0;
         assert_eq!(None, lapper.find(30, 35).next());
-        assert_eq!(None, lapper.seek(30, 35, &mut cursor).next())
+        assert_eq!(None, lapper.seek(30, 35, &mut cursor).next());
+        assert_eq!(lapper.find(30, 35).count(), lapper.count(30, 35));
     }
 
     // Test that a query that overlaps the start of an interval returns that interval
@@ -798,7 +799,8 @@ mod tests {
             val: 0,
         };
         assert_eq!(Some(&expected), lapper.find(15, 25).next());
-        assert_eq!(Some(&expected), lapper.seek(15, 25, &mut cursor).next())
+        assert_eq!(Some(&expected), lapper.seek(15, 25, &mut cursor).next());
+        assert_eq!(lapper.find(15, 25).count(), lapper.count(15, 25));
     }
 
     // Test that a query that overlaps the stop of an interval returns that interval
@@ -812,7 +814,8 @@ mod tests {
             val: 0,
         };
         assert_eq!(Some(&expected), lapper.find(25, 35).next());
-        assert_eq!(Some(&expected), lapper.seek(25, 35, &mut cursor).next())
+        assert_eq!(Some(&expected), lapper.seek(25, 35, &mut cursor).next());
+        assert_eq!(lapper.find(25, 35).count(), lapper.count(25, 35));
     }
 
     // Test that a query that is enveloped by interval returns interval
@@ -826,7 +829,8 @@ mod tests {
             val: 0,
         };
         assert_eq!(Some(&expected), lapper.find(22, 27).next());
-        assert_eq!(Some(&expected), lapper.seek(22, 27, &mut cursor).next())
+        assert_eq!(Some(&expected), lapper.seek(22, 27, &mut cursor).next());
+        assert_eq!(lapper.find(22, 27).count(), lapper.count(22, 27));
     }
 
     // Test that a query that envolops an interval returns that interval
@@ -840,7 +844,8 @@ mod tests {
             val: 0,
         };
         assert_eq!(Some(&expected), lapper.find(15, 35).next());
-        assert_eq!(Some(&expected), lapper.seek(15, 35, &mut cursor).next())
+        assert_eq!(Some(&expected), lapper.seek(15, 35, &mut cursor).next());
+        assert_eq!(lapper.find(15, 35).count(), lapper.count(15, 35));
     }
 
     #[test]
@@ -1075,6 +1080,7 @@ mod tests {
         let e1 = Iv {start: 50, stop: 55, val: 0};
         let found = lapper.find(50, 55).next();
         assert_eq!(found, Some(&e1));
+        assert_eq!(lapper.find(50, 55).count(), lapper.count(50,55));
     }
 
     // When there is a very long interval that spans many little intervals, test that the little
