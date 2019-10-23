@@ -301,6 +301,13 @@ impl<T: Eq + Clone> Lapper<T> {
                 })
                 .collect();
         }
+        // Fix the starts and stops used by counts
+        let (mut starts, mut stops): (Vec<_>, Vec<_>) =
+            self.intervals.iter().map(|x| (x.start, x.stop)).unzip();
+        starts.sort();
+        stops.sort();
+        self.starts = starts;
+        self.stops = stops;
     }
 
     /// Determine the first index that we should start checking for overlaps for via a binary
@@ -329,6 +336,8 @@ impl<T: Eq + Clone> Lapper<T> {
         }
         let mut high = elems.len();
         let mut low = 0;
+        println!("{:#?}", elems);
+        println!("High: {}, Low: {}", high, low);
 
         while high - low > 1 {
             let mid = (high + low) / 2;
@@ -487,7 +496,7 @@ impl<T: Eq + Clone> Lapper<T> {
     pub fn count(&self, start: u32, stop: u32) -> usize {
         let len = self.intervals.len();
         let mut first = Self::bsearch_seq(start, &self.stops);
-        let mut last = Self::bsearch_seq(stop, &self.starts);
+        let last = Self::bsearch_seq(stop, &self.starts);
         //println!("{}/{}", start, stop);
         //println!("pre start found in stops: {}: {}", first, self.stops[first]);
         //println!("pre stop found in starts: {}", last);
@@ -880,8 +889,10 @@ mod tests {
             &Iv{start: 60, stop: 65, val: 0},
             &Iv{start: 68, stop: 120, val: 0}, // max_len = 50
         ];
+        assert_eq!(lapper.intervals.len(), lapper.starts.len());
         lapper.merge_overlaps();
-        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>())
+        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
+        assert_eq!(lapper.intervals.len(), lapper.starts.len())
         
     }
 
