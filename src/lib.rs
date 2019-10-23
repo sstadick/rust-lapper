@@ -336,8 +336,6 @@ impl<T: Eq + Clone> Lapper<T> {
         }
         let mut high = elems.len();
         let mut low = 0;
-        println!("{:#?}", elems);
-        println!("High: {}, Low: {}", high, low);
 
         while high - low > 1 {
             let mid = (high + low) / 2;
