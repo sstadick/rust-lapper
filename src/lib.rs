@@ -49,7 +49,7 @@
 //! # Examples
 //!
 //! ```rust
-//!    use rust_lapper::{Interval, Lapper};
+//!    use rust_lapper::{Interval, Lapper, Bits};
 //!    use std::cmp;
 //!    type Iv = Interval<u32>;
 //!
@@ -94,9 +94,9 @@ pub struct Lapper<T: Eq + Clone> {
     /// List of intervasl
     pub intervals: Vec<Interval<T>>,
     /// Sorted list of start positions,
-    starts: Vec<u32>,
+    //starts: Vec<u32>,
     /// Sorted list of end positions,
-    stops: Vec<u32>,
+    //stops: Vec<u32>,
     /// The length of the longest interval
     max_len: u32,
     /// A cursor to hold the position in the list in between searches with `seek` method
@@ -107,13 +107,18 @@ pub struct Lapper<T: Eq + Clone> {
     pub overlaps_merged: bool,
 }
 
+/// A Binary Interval Search object
+#[derive(Debug)]
+pub struct Bits {
+    starts: Vec<u32>,
+    stops: Vec<u32>,
+}
+
 impl<T: Eq + Clone> Interval<T> {
     /// Compute the intsect between two intervals
     #[inline]
     pub fn intersect(&self, other: &Interval<T>) -> u32 {
-        std::cmp::min(self.stop, other.stop)
-            .checked_sub(std::cmp::max(self.start, other.start))
-            .unwrap_or(0)
+        std::cmp::min(self.stop, other.stop).saturating_sub(std::cmp::max(self.start, other.start))
     }
 
     /// Check if two intervals overlap
@@ -126,13 +131,18 @@ impl<T: Eq + Clone> Interval<T> {
 impl<T: Eq + Clone> Ord for Interval<T> {
     #[inline]
     fn cmp(&self, other: &Interval<T>) -> Ordering {
-        if self.start < other.start {
-            Ordering::Less
-        } else if other.start < self.start {
-            Ordering::Greater
-        } else {
-            self.stop.cmp(&other.stop)
+        match self.start.cmp(&other.start) {
+            Ordering::Less => Ordering::Less,
+            Ordering::Greater => Ordering::Greater,
+            _ => self.stop.cmp(&other.stop),
         }
+        //if self.start < other.start {
+        //Ordering::Less
+        //} else if other.start < self.start {
+        //Ordering::Greater
+        //} else {
+        //self.stop.cmp(&other.stop)
+        //}
     }
 }
 
@@ -150,6 +160,69 @@ impl<T: Eq + Clone> PartialEq for Interval<T> {
     }
 }
 
+impl Bits {
+    /// Create a new Bits object
+    #[inline]
+    pub fn new<T: Clone + Eq>(intervals: &[Interval<T>]) -> Self {
+        let (mut starts, mut stops): (Vec<_>, Vec<_>) =
+            intervals.iter().map(|x| (x.start, x.stop)).unzip();
+        starts.sort();
+        stops.sort();
+        Bits { starts, stops }
+    }
+
+    #[inline]
+    pub fn bsearch_seq(key: u32, elems: &[u32]) -> usize {
+        if elems[0] > key {
+            return 0;
+        }
+        let mut high = elems.len();
+        let mut low = 0;
+
+        while high - low > 1 {
+            let mid = (high + low) / 2;
+            if elems[mid] < key {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        high
+    }
+
+    /// Count all intervals that overlap start .. stop. This performs two binary search in order to
+    /// find all the excluded elements, and then deduces the intersection from there. See
+    /// [BITS](https://arxiv.org/pdf/1208.3407.pdf) for more details.
+    /// ```
+    /// use rust_lapper::{Lapper, Interval};
+    /// let lapper = Lapper::new((0..100).step_by(5)
+    ///                                 .map(|x| Interval{start: x, stop: x+2 , val: true})
+    ///                                 .collect::<Vec<Interval<bool>>>());
+    /// assert_eq!(lapper.build_bits().count(5, 11), 2);
+    /// ```
+    #[inline]
+    pub fn count(&self, start: u32, stop: u32) -> usize {
+        let len = self.starts.len();
+        let mut first = Self::bsearch_seq(start, &self.stops);
+        let last = Self::bsearch_seq(stop, &self.starts);
+        //println!("{}/{}", start, stop);
+        //println!("pre start found in stops: {}: {}", first, self.stops[first]);
+        //println!("pre stop found in starts: {}", last);
+        //while last < len && self.starts[last] == stop {
+        //last += 1;
+        //}
+        while first < len && self.stops[first] == start {
+            first += 1;
+        }
+        let num_cant_after = len - last;
+        //println!("{:#?}", self.starts);
+        //println!("{:#?}", self.stops);
+        //println!("start found in stops: {}", first);
+        //println!("stop found in starts: {}", last);
+        len - first - num_cant_after
+    }
+}
+
 impl<T: Eq + Clone> Lapper<T> {
     /// Create a new instance of Lapper by passing in a vector of Intervals. This vector will
     /// immediately be sorted by start order.
@@ -162,26 +235,30 @@ impl<T: Eq + Clone> Lapper<T> {
     /// ```
     pub fn new(mut intervals: Vec<Interval<T>>) -> Self {
         intervals.sort();
-        let (mut starts, mut stops): (Vec<_>, Vec<_>) =
-            intervals.iter().map(|x| (x.start, x.stop)).unzip();
-        starts.sort();
-        stops.sort();
         let mut max_len = 0;
         for interval in intervals.iter() {
-            let i_len = interval.stop.checked_sub(interval.start).unwrap_or(0);
+            let i_len = interval.stop.saturating_sub(interval.start);
             if i_len > max_len {
                 max_len = i_len;
             }
         }
         Lapper {
             intervals,
-            starts,
-            stops,
+            //starts,
+            //stops,
             max_len,
             cursor: 0,
             cov: None,
             overlaps_merged: false,
         }
+    }
+
+    pub fn build_bits(&self) -> Bits {
+        let (mut starts, mut stops): (Vec<_>, Vec<_>) =
+            self.intervals.iter().map(|x| (x.start, x.stop)).unzip();
+        starts.sort();
+        stops.sort();
+        Bits { starts, stops }
     }
 
     /// Get the number over intervals in Lapper
@@ -301,13 +378,6 @@ impl<T: Eq + Clone> Lapper<T> {
                 })
                 .collect();
         }
-        // Fix the starts and stops used by counts
-        let (mut starts, mut stops): (Vec<_>, Vec<_>) =
-            self.intervals.iter().map(|x| (x.start, x.stop)).unzip();
-        starts.sort();
-        stops.sort();
-        self.starts = starts;
-        self.stops = stops;
     }
 
     /// Determine the first index that we should start checking for overlaps for via a binary
@@ -327,25 +397,6 @@ impl<T: Eq + Clone> Lapper<T> {
             low = if v.start < start { other_low } else { low }
         }
         low
-    }
-
-    #[inline]
-    pub fn bsearch_seq(key: u32, elems: &[u32]) -> usize {
-        if elems[0] > key {
-            return 0;
-        }
-        let mut high = elems.len();
-        let mut low = 0;
-
-        while high - low > 1 {
-            let mid = (high + low) / 2;
-            if elems[mid] < key {
-                low = mid;
-            } else {
-                high = mid;
-            }
-        }
-        high
     }
 
     /// Find the union and the intersect of two lapper objects.
@@ -480,39 +531,6 @@ impl<T: Eq + Clone> Lapper<T> {
         }
     }
 
-    /// Count all intervals that overlap start .. stop. This performs two binary search in order to
-    /// find all the excluded elements, and then deduces the intersection from there. See
-    /// [BITS](https://arxiv.org/pdf/1208.3407.pdf) for more details.
-    /// ```
-    /// use rust_lapper::{Lapper, Interval};
-    /// let lapper = Lapper::new((0..100).step_by(5)
-    ///                                 .map(|x| Interval{start: x, stop: x+2 , val: true})
-    ///                                 .collect::<Vec<Interval<bool>>>());
-    /// assert_eq!(lapper.count(5, 11), 2);
-    /// ```
-    #[inline]
-    pub fn count(&self, start: u32, stop: u32) -> usize {
-        let len = self.intervals.len();
-        let mut first = Self::bsearch_seq(start, &self.stops);
-        let last = Self::bsearch_seq(stop, &self.starts);
-        //println!("{}/{}", start, stop);
-        //println!("pre start found in stops: {}: {}", first, self.stops[first]);
-        //println!("pre stop found in starts: {}", last);
-        //while last < len && self.starts[last] == stop {
-        //last += 1;
-        //}
-        while first < len && self.stops[first] == start {
-            first += 1;
-        }
-        let num_cant_after = len - last;
-        let result = len - first - num_cant_after;
-        //println!("{:#?}", self.starts);
-        //println!("{:#?}", self.stops);
-        //println!("start found in stops: {}", first);
-        //println!("stop found in starts: {}", last);
-        result
-    }
-
     /// Find all intervals that overlap start .. stop
     /// ```
     /// use rust_lapper::{Lapper, Interval};
@@ -525,10 +543,7 @@ impl<T: Eq + Clone> Lapper<T> {
     pub fn find(&self, start: u32, stop: u32) -> IterFind<T> {
         IterFind {
             inner: self,
-            off: Self::lower_bound(
-                start.checked_sub(self.max_len).unwrap_or(0),
-                &self.intervals,
-            ),
+            off: Self::lower_bound(start.saturating_sub(self.max_len), &self.intervals),
             end: self.intervals.len(),
             start,
             stop,
@@ -554,14 +569,11 @@ impl<T: Eq + Clone> Lapper<T> {
     pub fn seek<'a>(&'a self, start: u32, stop: u32, cursor: &mut usize) -> IterFind<'a, T> {
         if *cursor == 0 || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
         {
-            *cursor = Self::lower_bound(
-                start.checked_sub(self.max_len).unwrap_or(0),
-                &self.intervals,
-            );
+            *cursor = Self::lower_bound(start.saturating_sub(self.max_len), &self.intervals);
         }
 
         while *cursor + 1 < self.intervals.len()
-            && self.intervals[*cursor + 1].start < start.checked_sub(self.max_len).unwrap_or(0)
+            && self.intervals[*cursor + 1].start < start.saturating_sub(self.max_len)
         {
             *cursor += 1;
         }
@@ -782,7 +794,7 @@ mod tests {
         let mut cursor = 0;
         assert_eq!(None, lapper.find(15, 20).next());
         assert_eq!(None, lapper.seek(15, 20, &mut cursor).next());
-        assert_eq!(lapper.find(15, 20).count(), lapper.count(15, 20));
+        assert_eq!(lapper.find(15, 20).count(), lapper.build_bits().count(15, 20));
     }
 
     // Test that a query start that hits an interval end returns no interval
@@ -792,7 +804,7 @@ mod tests {
         let mut cursor = 0;
         assert_eq!(None, lapper.find(30, 35).next());
         assert_eq!(None, lapper.seek(30, 35, &mut cursor).next());
-        assert_eq!(lapper.find(30, 35).count(), lapper.count(30, 35));
+        assert_eq!(lapper.find(30, 35).count(), lapper.build_bits().count(30, 35));
     }
 
     // Test that a query that overlaps the start of an interval returns that interval
@@ -807,7 +819,7 @@ mod tests {
         };
         assert_eq!(Some(&expected), lapper.find(15, 25).next());
         assert_eq!(Some(&expected), lapper.seek(15, 25, &mut cursor).next());
-        assert_eq!(lapper.find(15, 25).count(), lapper.count(15, 25));
+        assert_eq!(lapper.find(15, 25).count(), lapper.build_bits().count(15, 25));
     }
 
     // Test that a query that overlaps the stop of an interval returns that interval
@@ -822,7 +834,7 @@ mod tests {
         };
         assert_eq!(Some(&expected), lapper.find(25, 35).next());
         assert_eq!(Some(&expected), lapper.seek(25, 35, &mut cursor).next());
-        assert_eq!(lapper.find(25, 35).count(), lapper.count(25, 35));
+        assert_eq!(lapper.find(25, 35).count(), lapper.build_bits().count(25, 35));
     }
 
     // Test that a query that is enveloped by interval returns interval
@@ -837,7 +849,7 @@ mod tests {
         };
         assert_eq!(Some(&expected), lapper.find(22, 27).next());
         assert_eq!(Some(&expected), lapper.seek(22, 27, &mut cursor).next());
-        assert_eq!(lapper.find(22, 27).count(), lapper.count(22, 27));
+        assert_eq!(lapper.find(22, 27).count(), lapper.build_bits().count(22, 27));
     }
 
     // Test that a query that envolops an interval returns that interval
@@ -852,7 +864,7 @@ mod tests {
         };
         assert_eq!(Some(&expected), lapper.find(15, 35).next());
         assert_eq!(Some(&expected), lapper.seek(15, 35, &mut cursor).next());
-        assert_eq!(lapper.find(15, 35).count(), lapper.count(15, 35));
+        assert_eq!(lapper.find(15, 35).count(), lapper.build_bits().count(15, 35));
     }
 
     #[test]
@@ -874,7 +886,7 @@ mod tests {
             vec![&e1, &e2],
             lapper.seek(8, 20, &mut cursor).collect::<Vec<&Iv>>()
         );
-        assert_eq!(lapper.count(8, 20), 2);
+        assert_eq!(lapper.build_bits().count(8, 20), 2);
     }
 
     #[test]
@@ -887,10 +899,10 @@ mod tests {
             &Iv{start: 60, stop: 65, val: 0},
             &Iv{start: 68, stop: 120, val: 0}, // max_len = 50
         ];
-        assert_eq!(lapper.intervals.len(), lapper.starts.len());
+        assert_eq!(lapper.intervals.len(), lapper.build_bits().starts.len());
         lapper.merge_overlaps();
         assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
-        assert_eq!(lapper.intervals.len(), lapper.starts.len())
+        assert_eq!(lapper.intervals.len(), lapper.build_bits().starts.len())
         
     }
 
@@ -994,7 +1006,7 @@ mod tests {
             &Iv{start: 9, stop: 11, val: 0},
             &Iv{start: 10, stop: 13, val: 0},
         ]);
-        assert_eq!(lapper.count(8, 11), 3);
+        assert_eq!(lapper.build_bits().count(8, 11), 3);
         let found = lapper.find(145, 151).collect::<Vec<&Iv>>();
         assert_eq!(found, vec![
             &Iv{start: 100, stop: 200, val: 0},
@@ -1002,7 +1014,7 @@ mod tests {
             &Iv{start: 150, stop: 200, val: 0},
         ]);
 
-        assert_eq!(lapper.count(145, 151), 3);
+        assert_eq!(lapper.build_bits().count(145, 151), 3);
     }
 
     #[test]
@@ -1089,7 +1101,7 @@ mod tests {
         let e1 = Iv {start: 50, stop: 55, val: 0};
         let found = lapper.find(50, 55).next();
         assert_eq!(found, Some(&e1));
-        assert_eq!(lapper.find(50, 55).count(), lapper.count(50,55));
+        assert_eq!(lapper.find(50, 55).count(), lapper.build_bits().count(50,55));
     }
 
     // When there is a very long interval that spans many little intervals, test that the little
@@ -1111,6 +1123,6 @@ mod tests {
         assert_eq!(found, vec![
             &Iv{start:28866309, stop: 33141404	, val: 0},
         ]);
-        assert_eq!(lapper.count(28974798, 33141355), 1);
+        assert_eq!(lapper.build_bits().count(28974798, 33141355), 1);
     }
 }
