@@ -89,7 +89,7 @@ pub struct Interval<T: Eq + Clone> {
 
 /// Primary object of the library. The public intervals holds all the intervals and can be used for
 /// iterating / pulling values out of the tree.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Lapper<T: Eq + Clone> {
     /// List of intervasl
     pub intervals: Vec<Interval<T>>,
