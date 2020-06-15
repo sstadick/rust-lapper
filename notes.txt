@@ -1,0 +1,6 @@
+
+Time on biofast with unaltered lapper
+on -a rna -b anno 8.93 real   | d version is 4.9 ish
+on -a anno -b rna 38.60 real  | d version is 11.0 ish
+
+
