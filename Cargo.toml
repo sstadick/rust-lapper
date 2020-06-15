@@ -11,7 +11,16 @@ readme = "README.md"
 categories = ["algorithms", "science"]
 keywords = ["tree", "interval", "bioinformatics", "ranges", "genomic"]
 
+[lib]
+name = "rust_lapper"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bed_cov"
+path = "src/main.rs"
+
 [dependencies]
+clap = "2.33.1"
 
 [dev-dependencies]
 criterion = "0.3"
