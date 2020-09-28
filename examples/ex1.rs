@@ -1,6 +1,6 @@
 use rust_lapper::{Interval, Lapper};
 
-type Iv = Interval<u32>;
+type Iv = Interval<usize, u32>;
 fn main() {
     // create some fake data
     let data: Vec<Iv> = vec![
@@ -127,4 +127,5 @@ fn main() {
             interval.start, interval.stop, interval.val
         );
     }
+
 }
