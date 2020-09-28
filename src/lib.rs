@@ -79,6 +79,8 @@ use num_traits::{identities::{one,zero}, PrimInt, Unsigned};
 use std::cmp::Ordering::{self};
 use std::collections::VecDeque;
 
+/// Represent a range from [start, stop)
+/// Inclusive start, exclusive of stop
 #[derive(Eq, Debug, Clone)]
 pub struct Interval<I, T>
 where
