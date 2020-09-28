@@ -12,6 +12,7 @@ categories = ["algorithms", "science"]
 keywords = ["tree", "interval", "bioinformatics", "ranges", "genomic"]
 
 [dependencies]
+num-traits = "0.2.12"
 
 [dev-dependencies]
 criterion = "0.3"

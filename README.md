@@ -4,7 +4,6 @@
 # rust-lapper
 
 [Documentation](https://docs.rs/rust-lapper)
-
 [Crates.io](https://crates.io/crates/rust-lapper)
 
 This is a rust port of Brent Pendersen's
@@ -14,10 +13,8 @@ iterators, so all adaptor methods may be used normally.
 
 This crate works well for most interval data that does not include very long
 intervals that engulf a majority of other intervals. It is still fairly
-comporable to other methods, even in it's worst case. See benchmarks
-below. If you absolutely need more guarentees around worst case I would
-recommend [AIList](https://github.com/sstadick/AIList) which handles
-large overlaps better at the cost of most normal cases.
+comparable to other methods. If you absolutely need time guarantees in the
+worst case, see [COItres](https://github.com/dcjones/coitrees) and [IITree](https://docs.rs/bio/0.32.0/bio/data_structures/interval_tree/struct.ArrayBackedIntervalTree.html).
 
 However, on more typical datasets, this crate is between 4-10x faster
 than other interval overlap methods.
@@ -35,10 +32,10 @@ Please see the
 for details on how the benchmarks were run... It's not fully baked yet
 though, and is finiky to run.
 
-Command to run: 
+Command to run:
 
 ```
-./target/release/interval_bakeoff fake -a -l ScAIList -l RustLapper -l
+./target/release/interval_bakeoff fake -a -l RustLapper -l
 RustBio -l NestedInterval -n50000 -u100000
 
 # This equates to the following params:
@@ -51,83 +48,138 @@ RustBio -l NestedInterval -n50000 -u100000
 
 Set A / b Creation Times
 
-|crate/method| A time| B time |
-|------------|---------| ------|
-|rust_lapper|15.625ms| 31.25ms| 
-|scailist|15.625ms| 15.625ms| 
-|nested_intervals|15.625ms| 15.625ms| 
-|bio|15.625ms| 31.25ms| 
+| crate/method     | A time   | B time   |
+| ---------------- | -------- | -------- |
+| rust_lapper      | 15.625ms | 31.25ms  |
+| nested_intervals | 15.625ms | 15.625ms |
+| bio              | 15.625ms | 31.25ms  |
 
 100% hit rate (A vs A)
 
-|crate/method|mean time| intersection | 
-|------------|---------| ------------ |
-|rust_lapper/find| 4.78125s | 1469068763 | 
-|rust_lapper/count|15.625ms|1469068763 | 
-|scailist/find|4.640625s| 1469068763| 
-|nested_intervals/query_overlapping|157.4375s|1469068763| 
-|bio/find|33.296875s|1469068763 | 
+| crate/method                       | mean time  | intersection |
+| ---------------------------------- | ---------- | ------------ |
+| rust_lapper/find                   | 4.78125s   | 1469068763   |
+| rust_lapper/count                  | 15.625ms   | 1469068763   |
+| nested_intervals/query_overlapping | 157.4375s  | 1469068763   |
+| bio/find                           | 33.296875s | 1469068763   |
 
 
 Sub 100% hit rate (A vs B)
 
-|crate/method|mean time| intersection | 
-|------------|---------| ------------ |
-|rust_lapper/find|531.25ms|176488436| 
-|rust_lapper/count|15.625ms|176488436 | 
-|scailist/find| 671.875ms|176488436 | 
-|nested_intervals/query_overlapping| 11.109375s|196090092|
-|bio/find|4.3125s|176488436| 
+| crate/method                       | mean time  | intersection |
+| ---------------------------------- | ---------- | ------------ |
+| rust_lapper/find                   | 531.25ms   | 176488436    |
+| rust_lapper/count                  | 15.625ms   | 176488436    |
+| nested_intervals/query_overlapping | 11.109375s | 196090092    |
+| bio/find                           | 4.3125s    | 176488436    |
 
 [nested_intervals](https://docs.rs/nested_intervals/0.2.0/nested_intervals/)
-
 [rust-bio](https://docs.rs/bio/0.28.2/bio/)
-
-[ScAIList]()
+*Note that rust-bio has a new interval tree structure which should be faster than what is shown here*
 
 ## Example
 
 ```rust
 use rust_lapper::{Interval, Lapper};
 
-type Iv = Interval<u32>;
+type Iv = Interval<usize, u32>;
 fn main() {
     // create some fake data
     let data: Vec<Iv> = vec![
-        Iv{start: 70, stop: 120, val: 0}, // max_len = 50
-        Iv{start: 10, stop: 15, val: 0},
-        Iv{start: 10, stop: 15, val: 0}, // exact overlap
-        Iv{start: 12, stop: 15, val: 0}, // inner overlap
-        Iv{start: 14, stop: 16, val: 0}, // overlap end
-        Iv{start: 40, stop: 45, val: 0},
-        Iv{start: 50, stop: 55, val: 0},
-        Iv{start: 60, stop: 65, val: 0},
-        Iv{start: 68, stop: 71, val: 0}, // overlap start
-        Iv{start: 70, stop: 75, val: 0},
+        Iv {
+            start: 70,
+            stop: 120,
+            val: 0,
+        }, // max_len = 50
+        Iv {
+            start: 10,
+            stop: 15,
+            val: 0,
+        },
+        Iv {
+            start: 10,
+            stop: 15,
+            val: 0,
+        }, // exact overlap
+        Iv {
+            start: 12,
+            stop: 15,
+            val: 0,
+        }, // inner overlap
+        Iv {
+            start: 14,
+            stop: 16,
+            val: 0,
+        }, // overlap end
+        Iv {
+            start: 40,
+            stop: 45,
+            val: 0,
+        },
+        Iv {
+            start: 50,
+            stop: 55,
+            val: 0,
+        },
+        Iv {
+            start: 60,
+            stop: 65,
+            val: 0,
+        },
+        Iv {
+            start: 68,
+            stop: 71,
+            val: 0,
+        }, // overlap start
+        Iv {
+            start: 70,
+            stop: 75,
+            val: 0,
+        },
     ];
 
-    // Make lapper structure
+    // make lapper structure
     let mut lapper = Lapper::new(data);
-    
+
     // Iterator based find to extract all intervals that overlap 6..7
     // If your queries are coming in start sorted order, use the seek method to retain a cursor for
     // a big speedup.
     assert_eq!(
-        lapper.find(11, 15).collect::<Vec<&Iv>>(), vec![
-            &Iv{start: 10, stop: 15, val: 0},
-            &Iv{start: 10, stop: 15, val: 0}, // exact overlap
-            &Iv{start: 12, stop: 15, val: 0}, // inner overlap
-            &Iv{start: 14, stop: 16, val: 0}, // overlap end
+        lapper.find(11, 15).collect::<Vec<&Iv>>(),
+        vec![
+            &Iv {
+                start: 10,
+                stop: 15,
+                val: 0
+            },
+            &Iv {
+                start: 10,
+                stop: 15,
+                val: 0
+            }, // exact overlap
+            &Iv {
+                start: 12,
+                stop: 15,
+                val: 0
+            }, // inner overlap
+            &Iv {
+                start: 14,
+                stop: 16,
+                val: 0
+            }, // overlap end
         ]
     );
 
-    // Merge overlapping regions within the lapper to simlify and speed up queries that only depend
-    // on 'any' overlap and not how many
+    // Merge overlaping regions within the lapper to simplifiy and speed up quries that only depend
+    // on 'any
     lapper.merge_overlaps();
     assert_eq!(
-        lapper.find(11, 15).collect::<Vec<&Iv>>(), vec![
-            &Iv{start: 10, stop: 16, val: 0},
-        ]
+        lapper.find(11, 15).collect::<Vec<&Iv>>(),
+        vec![&Iv {
+            start: 10,
+            stop: 16,
+            val: 0
+        },]
     );
 
     // Get the number of positions covered by the lapper tree:
@@ -135,12 +187,29 @@ fn main() {
 
     // Get the union and intersect of two different lapper trees
     let data = vec![
-        Iv{start: 5, stop: 15, val: 0},
-        Iv{start: 48, stop: 80, val: 0},
+        Iv {
+            start: 5,
+            stop: 15,
+            val: 0,
+        },
+        Iv {
+            start: 48,
+            stop: 80,
+            val: 0,
+        },
     ];
     let (union, intersect) = lapper.union_and_intersect(&Lapper::new(data));
     assert_eq!(union, 88);
     assert_eq!(intersect, 27);
+
+    // Get the depth at each position covered by the lapper
+    for interval in lapper.depth().filter(|x| x.val > 2) {
+        println!(
+            "Depth at {} - {}: {}",
+            interval.start, interval.stop, interval.val
+        );
+    }
+
 }
 ```
 
@@ -148,4 +217,5 @@ fn main() {
 
 -`0.4.0`: Addition of the BITS count algorithm.
 -`0.4.2`: Bugfix in to update starts/stops vectors when overlaps merged
--`0.4.3`: Remove leftover print statement 
+-`0.4.3`: Remove leftover print statement
+-`0.5.0`: Make Interval start/stop generic

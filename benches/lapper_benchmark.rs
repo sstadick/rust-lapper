@@ -12,7 +12,7 @@ use rust_lapper::{Interval, Lapper};
 use std::ops::Range;
 use std::time::Duration;
 
-type Iv = Interval<bool>;
+type Iv = Interval<u32, bool>;
 
 fn randomi(imin: u32, imax: u32) -> u32 {
     let mut rng = rand::thread_rng();
