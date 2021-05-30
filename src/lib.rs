@@ -350,6 +350,8 @@ where
 
     /// Determine the first index that we should start checking for overlaps for via a binary
     /// search.
+    /// Assumes that the maximum interval length in `intervals` has been subtracted from
+    /// `start`, otherwise the result is undefined
     #[inline]
     pub fn lower_bound(start: I, intervals: &[Interval<I, T>]) -> usize {
         let mut size = intervals.len();
