@@ -340,6 +340,12 @@ where
         stops.sort();
         self.starts = starts;
         self.stops = stops;
+        self.max_len = self
+            .intervals
+            .iter()
+            .map(|x| x.stop.checked_sub(&x.start).unwrap_or(zero::<I>()))
+            .max()
+            .unwrap_or(zero::<I>());
     }
 
     /// Determine the first index that we should start checking for overlaps for via a binary
