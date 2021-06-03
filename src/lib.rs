@@ -340,10 +340,18 @@ where
         stops.sort();
         self.starts = starts;
         self.stops = stops;
+        self.max_len = self
+            .intervals
+            .iter()
+            .map(|x| x.stop.checked_sub(&x.start).unwrap_or(zero::<I>()))
+            .max()
+            .unwrap_or(zero::<I>());
     }
 
     /// Determine the first index that we should start checking for overlaps for via a binary
     /// search.
+    /// Assumes that the maximum interval length in `intervals` has been subtracted from
+    /// `start`, otherwise the result is undefined
     #[inline]
     pub fn lower_bound(start: I, intervals: &[Interval<I, T>]) -> usize {
         let mut size = intervals.len();
@@ -951,6 +959,33 @@ mod tests {
         assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
         assert_eq!(lapper.intervals.len(), lapper.starts.len())
 
+    }
+
+    // This test was added because this breakage was found in a library user's code, where after
+    // calling merge_overlaps(), the find() call returned an empty iterator.
+    #[test]
+    fn test_merge_overlaps_find() {
+        let data = vec![
+                Iv{start: 2, stop: 3, val: 0},
+                Iv{start: 3, stop: 4, val: 0},
+                Iv{start: 4, stop: 6, val: 0},
+                Iv{start: 6, stop: 7, val: 0},
+                Iv{start: 7, stop: 8, val: 0},
+        ];
+        let mut lapper = Lapper::new(data);
+
+        let found = lapper.find(7, 9).collect::<Vec<&Interval<_,_>>>();
+        assert_eq!(found, vec![
+            &Iv{start:7, stop: 8, val: 0},
+        ]);
+
+        // merge_overlaps should merge all intervals to one, which should be returned in the find call.
+        lapper.merge_overlaps();
+
+        let found = lapper.find(7, 9).collect::<Vec<&Interval<_,_>>>();
+        assert_eq!(found, vec![
+            &Iv{start:2, stop: 8, val: 0},
+        ]);
     }
 
     #[test]
