@@ -12,7 +12,9 @@ categories = ["algorithms", "science"]
 keywords = ["tree", "interval", "bioinformatics", "ranges", "genomic"]
 
 [dependencies]
+bincode = "1.3.3"
 num-traits = "0.2.12"
+serde = { version  = "1.0.127", features = ["derive"] }
 
 [dev-dependencies]
 criterion = "0.3"

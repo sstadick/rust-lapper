@@ -78,10 +78,11 @@
 use num_traits::{identities::{one,zero}, PrimInt, Unsigned};
 use std::cmp::Ordering::{self};
 use std::collections::VecDeque;
+use serde::{Serialize, Deserialize};
 
 /// Represent a range from [start, stop)
 /// Inclusive start, exclusive of stop
-#[derive(Eq, Debug, Clone)]
+#[derive(Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct Interval<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
@@ -94,7 +95,7 @@ where
 
 /// Primary object of the library. The public intervals holds all the intervals and can be used for
 /// iterating / pulling values out of the tree.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lapper<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
