@@ -1,7 +1,10 @@
-![docs](https://docs.rs/rust-lapper/badge.svg)
-![crates.io](https://img.shields.io/crates/v/rust-lapper.svg)
-
 # rust-lapper
+
+<p align="center">
+  <a href="https://github.com/sstadick/rust-lapper/actions?query=workflow%3Aci"><img src="https://github.com/sstadick/rust-lapper/workflows/ci/badge.svg" alt="Build Status"></a>
+  <img src="https://img.shields.io/crates/l/rust-lapper.svg" alt="license">
+  <a href="https://crates.io/crates/rust-lapper"><img src="https://img.shields.io/crates/v/rust-lapper.svg?colorB=319e8c" alt="Version info"></a><br>
+</p>
 
 [Documentation](https://docs.rs/rust-lapper)
 [Crates.io](https://crates.io/crates/rust-lapper)
