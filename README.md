@@ -229,8 +229,8 @@ fn main() {
 
 ## Release Notes
 
--`0.4.0`: Addition of the BITS count algorithm.
--`0.4.2`: Bugfix in to update starts/stops vectors when overlaps merged
--`0.4.3`: Remove leftover print statement
--`0.5.0`: Make Interval start/stop generic
--`1.0.0`: Add serde support via the `with_serde` feature flag
+- `0.4.0`: Addition of the BITS count algorithm.
+- `0.4.2`: Bugfix in to update starts/stops vectors when overlaps merged
+- `0.4.3`: Remove leftover print statement
+- `0.5.0`: Make Interval start/stop generic
+- `1.0.0`: Add serde support via the `with_serde` feature flag
