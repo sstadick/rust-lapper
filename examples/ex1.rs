@@ -127,5 +127,4 @@ fn main() {
             interval.start, interval.stop, interval.val
         );
     }
-
 }

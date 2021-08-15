@@ -75,10 +75,13 @@
 //!    }
 //!    assert_eq!(sim, 4);
 //! ```
-use num_traits::{identities::{one,zero}, PrimInt, Unsigned};
+use num_traits::{
+    identities::{one, zero},
+    PrimInt, Unsigned,
+};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering::{self};
 use std::collections::VecDeque;
-use serde::{Serialize, Deserialize};
 
 /// Represent a range from [start, stop)
 /// Inclusive start, exclusive of stop
@@ -604,7 +607,8 @@ where
         }
 
         while *cursor + 1 < self.intervals.len()
-            && self.intervals[*cursor + 1].start < start.checked_sub(&self.max_len).unwrap_or(zero::<I>())
+            && self.intervals[*cursor + 1].start
+                < start.checked_sub(&self.max_len).unwrap_or(zero::<I>())
         {
             *cursor += 1;
         }
