@@ -24,6 +24,17 @@ type, and should be about as fast as it is possible to be on any
 dataset. It is an implementation of the [BITS
 algorithm](https://academic.oup.com/bioinformatics/article/29/1/1/273289)
 
+## Serde Support
+
+`rust-lapper` supports serialization with serde for `Lapper` and `Interval` objects:
+
+```toml
+[dependencies]
+rust-lapper = { version = "*", features = ["with_serde"] }
+```
+
+See `examples/serde.rs` for a brief example.
+
 ## Benchmarks
 
 Benchmarking interval tree-ish datastructures is hard
@@ -219,3 +230,4 @@ fn main() {
 -`0.4.2`: Bugfix in to update starts/stops vectors when overlaps merged
 -`0.4.3`: Remove leftover print statement
 -`0.5.0`: Make Interval start/stop generic
+-`1.0.0`: Add serde support via the `with_serde` feature flag

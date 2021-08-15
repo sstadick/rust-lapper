@@ -82,7 +82,8 @@ use serde::{Serialize, Deserialize};
 
 /// Represent a range from [start, stop)
 /// Inclusive start, exclusive of stop
-#[derive(Eq, Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "with_serde", derive(Serialize, Deserialize))]
+#[derive(Eq, Debug, Clone)]
 pub struct Interval<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
@@ -95,7 +96,8 @@ where
 
 /// Primary object of the library. The public intervals holds all the intervals and can be used for
 /// iterating / pulling values out of the tree.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "with_serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
 pub struct Lapper<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
@@ -1208,4 +1210,28 @@ mod tests {
         ]);
         assert_eq!(lapper.count(28974798, 33141355), 1);
     }
+
+    #[test]
+    fn serde_test() {
+        let data = vec![
+            Iv{start:25264912, stop: 25264986, val: 0},
+            Iv{start:27273024, stop: 27273065	, val: 0},
+            Iv{start:27440273, stop: 27440318	, val: 0},
+            Iv{start:27488033, stop: 27488125	, val: 0},
+            Iv{start:27938410, stop: 27938470	, val: 0},
+            Iv{start:27959118, stop: 27959171	, val: 0},
+            Iv{start:28866309, stop: 33141404	, val: 0},
+        ];
+        let lapper = Lapper::new(data);
+
+        let serialized = bincode::serialize(&lapper).unwrap();
+        let deserialzed: Lapper<usize, u32> = bincode::deserialize(&serialized).unwrap();
+
+        let found = deserialzed.find(28974798, 33141355).collect::<Vec<&Iv>>();
+        assert_eq!(found, vec![
+            &Iv{start:28866309, stop: 33141404	, val: 0},
+        ]);
+        assert_eq!(deserialzed.count(28974798, 33141355), 1);
+    }
+
 }
