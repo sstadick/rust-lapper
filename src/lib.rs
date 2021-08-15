@@ -79,9 +79,11 @@ use num_traits::{
     identities::{one, zero},
     PrimInt, Unsigned,
 };
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering::{self};
 use std::collections::VecDeque;
+
+#[cfg(feature = "with_serde")]
+use serde::{Deserialize, Serialize};
 
 /// Represent a range from [start, stop)
 /// Inclusive start, exclusive of stop
@@ -132,7 +134,7 @@ where
     pub fn intersect(&self, other: &Interval<I, T>) -> I {
         std::cmp::min(self.stop, other.stop)
             .checked_sub(std::cmp::max(&self.start, &other.start))
-            .unwrap_or(zero::<I>())
+            .unwrap_or_else(zero::<I>)
     }
 
     /// Check if two intervals overlap
@@ -149,12 +151,10 @@ where
 {
     #[inline]
     fn cmp(&self, other: &Interval<I, T>) -> Ordering {
-        if self.start < other.start {
-            Ordering::Less
-        } else if other.start < self.start {
-            Ordering::Greater
-        } else {
-            self.stop.cmp(&other.stop)
+        match self.start.cmp(&other.start) {
+            Ordering::Less => Ordering::Less,
+            Ordering::Greater => Ordering::Greater,
+            Ordering::Equal => self.stop.cmp(&other.stop),
         }
     }
 }
@@ -166,7 +166,7 @@ where
 {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(&other))
+        Some(self.cmp(other))
     }
 }
 
@@ -206,7 +206,7 @@ where
             let i_len = interval
                 .stop
                 .checked_sub(&interval.start)
-                .unwrap_or(zero::<I>());
+                .unwrap_or_else(zero::<I>);
             if i_len > max_len {
                 max_len = i_len;
             }
@@ -349,9 +349,9 @@ where
         self.max_len = self
             .intervals
             .iter()
-            .map(|x| x.stop.checked_sub(&x.start).unwrap_or(zero::<I>()))
+            .map(|x| x.stop.checked_sub(&x.start).unwrap_or_else(zero::<I>))
             .max()
-            .unwrap_or(zero::<I>());
+            .unwrap_or_else(zero::<I>);
     }
 
     /// Determine the first index that we should start checking for overlaps for via a binary
@@ -551,12 +551,11 @@ where
             first += 1;
         }
         let num_cant_after = len - last;
-        let result = len - first - num_cant_after;
+        len - first - num_cant_after
         //println!("{:#?}", self.starts);
         //println!("{:#?}", self.stops);
         //println!("start found in stops: {}", first);
         //println!("stop found in starts: {}", last);
-        result
     }
 
     /// Find all intervals that overlap start .. stop
@@ -572,7 +571,7 @@ where
         IterFind {
             inner: self,
             off: Self::lower_bound(
-                start.checked_sub(&self.max_len).unwrap_or(zero::<I>()),
+                start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>),
                 &self.intervals,
             ),
             end: self.intervals.len(),
@@ -601,14 +600,14 @@ where
         if *cursor == 0 || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
         {
             *cursor = Self::lower_bound(
-                start.checked_sub(&self.max_len).unwrap_or(zero::<I>()),
+                start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>),
                 &self.intervals,
             );
         }
 
         while *cursor + 1 < self.intervals.len()
             && self.intervals[*cursor + 1].start
-                < start.checked_sub(&self.max_len).unwrap_or(zero::<I>())
+                < start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>)
         {
             *cursor += 1;
         }
@@ -808,8 +807,7 @@ mod tests {
                 val: 0,
             })
             .collect();
-        let lapper = Lapper::new(data);
-        lapper
+        Lapper::new(data)
     }
     fn setup_overlapping() -> Lapper<usize, u32> {
         let data: Vec<Iv> = (0..100)
@@ -820,8 +818,7 @@ mod tests {
                 val: 0,
             })
             .collect();
-        let lapper = Lapper::new(data);
-        lapper
+        Lapper::new(data)
     }
     fn setup_badlapper() -> Lapper<usize, u32> {
         let data: Vec<Iv> = vec![
@@ -836,8 +833,7 @@ mod tests {
             Iv{start: 68, stop: 71, val: 0}, // overlap start
             Iv{start: 70, stop: 75, val: 0},
         ];
-        let lapper = Lapper::new(data);
-        lapper
+        Lapper::new(data)
     }
     fn setup_single() -> Lapper<usize, u32> {
         let data: Vec<Iv> = vec![Iv {
@@ -845,8 +841,7 @@ mod tests {
             stop: 35,
             val: 0,
         }];
-        let lapper = Lapper::new(data);
-        lapper
+        Lapper::new(data)
     }
 
     // Test that a query stop that hits an interval start returns no interval
