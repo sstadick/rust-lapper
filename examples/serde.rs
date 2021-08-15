@@ -127,4 +127,9 @@ fn main() {
             interval.start, interval.stop, interval.val
         );
     }
+
+    let encoded = bincode::serialize(&lapper).unwrap();
+    let decoded: Lapper<usize, u32> = bincode::deserialize(&encoded[..]).unwrap();
+    dbg!(lapper);
+    dbg!(decoded);
 }

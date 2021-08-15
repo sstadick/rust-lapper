@@ -1,7 +1,10 @@
-![docs](https://docs.rs/rust-lapper/badge.svg)
-![crates.io](https://img.shields.io/crates/v/rust-lapper.svg)
-
 # rust-lapper
+
+<p align="center">
+  <a href="https://github.com/sstadick/rust-lapper/actions?query=workflow%3Aci"><img src="https://github.com/sstadick/rust-lapper/workflows/ci/badge.svg" alt="Build Status"></a>
+  <img src="https://img.shields.io/crates/l/rust-lapper.svg" alt="license">
+  <a href="https://crates.io/crates/rust-lapper"><img src="https://img.shields.io/crates/v/rust-lapper.svg?colorB=319e8c" alt="Version info"></a><br>
+</p>
 
 [Documentation](https://docs.rs/rust-lapper)
 [Crates.io](https://crates.io/crates/rust-lapper)
@@ -23,6 +26,17 @@ It should also be noted that the `count` method is agnostic to data
 type, and should be about as fast as it is possible to be on any
 dataset. It is an implementation of the [BITS
 algorithm](https://academic.oup.com/bioinformatics/article/29/1/1/273289)
+
+## Serde Support
+
+`rust-lapper` supports serialization with serde for `Lapper` and `Interval` objects:
+
+```toml
+[dependencies]
+rust-lapper = { version = "*", features = ["with_serde"] }
+```
+
+See `examples/serde.rs` for a brief example.
 
 ## Benchmarks
 
@@ -219,3 +233,4 @@ fn main() {
 -`0.4.2`: Bugfix in to update starts/stops vectors when overlaps merged
 -`0.4.3`: Remove leftover print statement
 -`0.5.0`: Make Interval start/stop generic
+-`1.0.0`: Add serde support via the `with_serde` feature flag
