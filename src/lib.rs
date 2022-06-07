@@ -116,8 +116,6 @@ where
     stops: Vec<I>,
     /// The length of the longest interval
     max_len: I,
-    /// A cursor to hold the position in the list in between searches with `seek` method
-    cursor: usize,
     /// The calculated number of positions covered by the intervals
     cov: Option<I>,
     /// Whether or not overlaps have been merged
@@ -216,7 +214,6 @@ where
             starts,
             stops,
             max_len,
-            cursor: 0,
             cov: None,
             overlaps_merged: false,
         }
@@ -574,7 +571,6 @@ where
                 start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>),
                 &self.intervals,
             ),
-            end: self.intervals.len(),
             start,
             stop,
         }
@@ -615,7 +611,6 @@ where
         IterFind {
             inner: self,
             off: *cursor,
-            end: self.intervals.len(),
             start,
             stop,
         }
@@ -631,7 +626,6 @@ where
 {
     inner: &'a Lapper<I, T>,
     off: usize,
-    end: usize,
     start: I,
     stop: I,
 }
