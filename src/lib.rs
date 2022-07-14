@@ -25,7 +25,7 @@
 //! Answer: ((0,10], (5,9], (8,11])
 //! ```
 //!
-//! Most interaction with this crate will be through the [`Lapper``](struct.Lapper.html)` struct
+//! Most interaction with this crate will be through the [`Lapper`](struct.Lapper.html) struct
 //! The main methods are [`find`](struct.Lapper.html#method.find),
 //! [`seek`](struct.Lapper.html#method.seek), and [`count`](struct.Lapper.html#method.count)
 //! where both `seek` and `count` are special cases allowing for very fast queries in certain scenarios.
