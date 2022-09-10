@@ -219,8 +219,8 @@ where
         }
     }
 
-    /// Insert an interval onto the tree. This is very inefficient and should be 
-    /// avoided if possible.
+    /// Insert a new interval after the Lapper has been created. This is very
+    /// inefficient and should be avoided if possible.
     ///
     /// SIDE EFFECTS: This clears cov() and overlaps_merged
     /// meaning that those will have to be recomputed after a insert
@@ -229,7 +229,7 @@ where
     /// let data : Vec<Interval<usize, usize>>= vec!{
     ///     Interval{start:0,  stop:5,  val:1},
     ///     Interval{start:6,  stop:10, val:2},
-    /// }; 
+    /// };
     /// let mut lapper = Lapper::new(data);
     /// lapper.insert(Interval{start:0, stop:20, val:5});
     /// assert_eq!(lapper.len(), 3);
@@ -239,9 +239,9 @@ where
     ///         &Interval{start:0, stop:20, val:5},
     ///     ]
     /// );
-    /// 
+    ///
     /// ```
-    pub fn insert(&mut self, elem:Interval<I,T>) {
+    pub fn insert(&mut self, elem: Interval<I, T>) {
         let starts_insert_index = Self::bsearch_seq(elem.start, &self.starts);
         let stops_insert_index = Self::bsearch_seq(elem.stop, &self.stops);
         let intervals_insert_index = Self::bsearch_seq_ref(&elem, &self.intervals);
@@ -410,14 +410,17 @@ where
     }
 
     #[inline]
-    pub fn bsearch_seq<K>(key: K, elems: &[K]) -> usize 
-        where K: PartialEq+PartialOrd
+    pub fn bsearch_seq<K>(key: K, elems: &[K]) -> usize
+    where
+        K: PartialEq + PartialOrd,
     {
         Self::bsearch_seq_ref(&key, elems)
     }
+
     #[inline]
-    pub fn bsearch_seq_ref<K>(key: &K, elems: &[K]) -> usize 
-        where K: PartialEq+PartialOrd
+    pub fn bsearch_seq_ref<K>(key: &K, elems: &[K]) -> usize
+    where
+        K: PartialEq + PartialOrd,
     {
         if elems.is_empty() {
             return 0;
@@ -850,9 +853,11 @@ mod tests {
             })
             .collect()
     }
+
     fn setup_nonoverlapping() -> Lapper<usize, u32> {
         Lapper::new(get_data_nonoverlapping())
     }
+
     fn setup_nonoverlapping_insert() -> Lapper<usize, u32> {
         let mut lapper = Lapper::new(vec![]);
         for elem in get_data_nonoverlapping() {
@@ -860,6 +865,7 @@ mod tests {
         }
         lapper
     }
+
     fn get_data_overlapping() -> Vec<Iv> {
          (0..100)
             .step_by(10)
@@ -870,17 +876,19 @@ mod tests {
             })
             .collect()
     }
+
     fn setup_overlapping() -> Lapper<usize, u32> {
         Lapper::new(get_data_overlapping())
     }
+
     fn setup_overlapping_insert() -> Lapper<usize, u32> {
         let mut lapper = Lapper::new(vec![]);
         for elem in get_data_overlapping() {
             lapper.insert(elem);
         }
         lapper
-
     }
+
     fn get_data_badlapper() -> Vec<Iv> {
         vec![
             Iv{start: 70, stop: 120, val: 0}, // max_len = 50
@@ -899,6 +907,7 @@ mod tests {
     fn setup_badlapper() -> Lapper<usize, u32> {
         Lapper::new(get_data_badlapper())
     }
+
     fn setup_badlapper_insert() -> Lapper<usize, u32> {
         let mut lapper = Lapper::new(vec![]);
         for elem in get_data_badlapper() {
@@ -924,6 +933,7 @@ mod tests {
         assert_eq!(None, lapper.seek(15, 20, &mut cursor).next());
         assert_eq!(lapper.find(15, 20).count(), lapper.count(15, 20));
     }
+
     // Test that a query stop that hits an interval start returns no interval
     #[test]
     fn test_query_stop_interval_start_insert() {
@@ -943,6 +953,7 @@ mod tests {
         assert_eq!(None, lapper.seek(30, 35, &mut cursor).next());
         assert_eq!(lapper.find(30, 35).count(), lapper.count(30, 35));
     }
+
     // Test that a query start that hits an interval end returns no interval
     #[test]
     fn test_query_start_interval_stop_insert() {
@@ -967,6 +978,7 @@ mod tests {
         assert_eq!(Some(&expected), lapper.seek(15, 25, &mut cursor).next());
         assert_eq!(lapper.find(15, 25).count(), lapper.count(15, 25));
     }
+
     // Test that a query that overlaps the start of an interval returns that interval
     #[test]
     fn test_query_overlaps_interval_start_insert() {
@@ -1048,6 +1060,7 @@ mod tests {
         );
         assert_eq!(lapper.count(8, 20), 2);
     }
+
     #[test]
     fn test_overlapping_intervals_insert() {
         let lapper = setup_overlapping_insert();
@@ -1084,8 +1097,8 @@ mod tests {
         lapper.merge_overlaps();
         assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
         assert_eq!(lapper.intervals.len(), lapper.starts.len())
-
     }
+
     #[test]
     fn test_merge_overlaps_insert() {
         let mut lapper = setup_badlapper_insert();
@@ -1100,8 +1113,8 @@ mod tests {
         lapper.merge_overlaps();
         assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
         assert_eq!(lapper.intervals.len(), lapper.starts.len())
-
     }
+
     #[test]
     fn test_merge_overlaps_insert_half() {
         let data = get_data_badlapper();
@@ -1121,7 +1134,6 @@ mod tests {
         lapper.merge_overlaps();
         assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
         assert_eq!(lapper.intervals.len(), lapper.starts.len())
-
     }
 
     // This test was added because this breakage was found in a library user's code, where after
@@ -1163,6 +1175,7 @@ mod tests {
         lapper.set_cov();
         assert_eq!(lapper.cov(), 50);
     }
+
     #[test]
     fn test_lapper_cov_insert() {
         let mut lapper = setup_badlapper_insert();
