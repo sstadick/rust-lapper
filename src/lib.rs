@@ -843,54 +843,32 @@ mod tests {
     use super::*;
 
     type Iv = Interval<usize, u32>;
-    fn get_data_nonoverlapping() -> Vec<Iv> {
-         (0..100)
+    fn setup_nonoverlapping() -> Lapper<usize, u32> {
+        let data: Vec<Iv> = (0..100)
             .step_by(20)
             .map(|x| Iv {
                 start: x,
                 stop: x + 10,
                 val: 0,
             })
-            .collect()
+            .collect();
+        Lapper::new(data)
     }
 
-    fn setup_nonoverlapping() -> Lapper<usize, u32> {
-        Lapper::new(get_data_nonoverlapping())
-    }
-
-    fn setup_nonoverlapping_insert() -> Lapper<usize, u32> {
-        let mut lapper = Lapper::new(vec![]);
-        for elem in get_data_nonoverlapping() {
-            lapper.insert(elem);
-        }
-        lapper
-    }
-
-    fn get_data_overlapping() -> Vec<Iv> {
-         (0..100)
+    fn setup_overlapping() -> Lapper<usize, u32> {
+        let data: Vec<Iv> = (0..100)
             .step_by(10)
             .map(|x| Iv {
                 start: x,
                 stop: x + 15,
                 val: 0,
             })
-            .collect()
+            .collect();
+        Lapper::new(data)
     }
 
-    fn setup_overlapping() -> Lapper<usize, u32> {
-        Lapper::new(get_data_overlapping())
-    }
-
-    fn setup_overlapping_insert() -> Lapper<usize, u32> {
-        let mut lapper = Lapper::new(vec![]);
-        for elem in get_data_overlapping() {
-            lapper.insert(elem);
-        }
-        lapper
-    }
-
-    fn get_data_badlapper() -> Vec<Iv> {
-        vec![
+    fn setup_badlapper() -> Lapper<usize, u32> {
+        let data: Vec<Iv> = vec![
             Iv{start: 70, stop: 120, val: 0}, // max_len = 50
             Iv{start: 10, stop: 15, val: 0},
             Iv{start: 10, stop: 15, val: 0}, // exact overlap
@@ -901,20 +879,10 @@ mod tests {
             Iv{start: 60, stop: 65, val: 0},
             Iv{start: 68, stop: 71, val: 0}, // overlap start
             Iv{start: 70, stop: 75, val: 0},
-        ]
+        ];
+        Lapper::new(data)
     }
 
-    fn setup_badlapper() -> Lapper<usize, u32> {
-        Lapper::new(get_data_badlapper())
-    }
-
-    fn setup_badlapper_insert() -> Lapper<usize, u32> {
-        let mut lapper = Lapper::new(vec![]);
-        for elem in get_data_badlapper() {
-            lapper.insert(elem);
-        }
-        lapper
-    }
     fn setup_single() -> Lapper<usize, u32> {
         let data: Vec<Iv> = vec![Iv {
             start: 10,
@@ -924,20 +892,125 @@ mod tests {
         Lapper::new(data)
     }
 
-    // Test that a query stop that hits an interval start returns no interval
+    // Test that inserting data ends up with the same lapper (nonoverlapping)
     #[test]
-    fn test_query_stop_interval_start() {
-        let lapper = setup_nonoverlapping();
-        let mut cursor = 0;
-        assert_eq!(None, lapper.find(15, 20).next());
-        assert_eq!(None, lapper.seek(15, 20, &mut cursor).next());
-        assert_eq!(lapper.find(15, 20).count(), lapper.count(15, 20));
+    fn insert_equality_nonoverlapping() {
+        let data: Vec<Iv> = (0..100)
+            .step_by(20)
+            .map(|x| Iv {
+                start: x,
+                stop: x + 10,
+                val: 0,
+            })
+            .collect();
+        let new_lapper = Lapper::new(data.clone());
+        let mut insert_lapper = Lapper::new(vec![]);
+        for elem in data {
+            insert_lapper.insert(elem);
+        }
+        assert_eq!(new_lapper.starts, insert_lapper.starts);
+        assert_eq!(new_lapper.stops, insert_lapper.stops);
+        assert_eq!(new_lapper.intervals, insert_lapper.intervals);
+        assert_eq!(new_lapper.max_len, insert_lapper.max_len);
+    }
+
+    // Test that inserting data ends up with the same lapper (overlapping)
+    #[test]
+    fn insert_equality_overlapping() {
+        let data: Vec<Iv> = (0..100)
+            .step_by(10)
+            .map(|x| Iv {
+                start: x,
+                stop: x + 15,
+                val: 0,
+            })
+            .collect();
+        let new_lapper = Lapper::new(data.clone());
+        let mut insert_lapper = Lapper::new(vec![]);
+        for elem in data {
+            insert_lapper.insert(elem);
+        }
+        assert_eq!(new_lapper.starts, insert_lapper.starts);
+        assert_eq!(new_lapper.stops, insert_lapper.stops);
+        assert_eq!(new_lapper.intervals, insert_lapper.intervals);
+        assert_eq!(new_lapper.max_len, insert_lapper.max_len);
+    }
+
+    // Test that inserting data half with new and half with insert
+    // ends up with the same lapper
+    #[test]
+    fn insert_equality_half_and_half() {
+        let data: Vec<Iv> = (0..100)
+            .step_by(1)
+            .map(|x| Iv {
+                start: x,
+                stop: x + 15,
+                val: 0,
+            })
+            .collect();
+        let new_lapper = Lapper::new(data.clone());
+        let (new_data, insert_data) = data.split_at(50);
+        let mut insert_lapper = Lapper::new(new_data.to_vec());
+        let mut insert_data = insert_data.to_vec();
+        insert_data.reverse();
+        for elem in insert_data {
+            insert_lapper.insert(elem);
+        }
+        assert_eq!(new_lapper.starts, insert_lapper.starts);
+        assert_eq!(new_lapper.stops, insert_lapper.stops);
+        assert_eq!(new_lapper.intervals, insert_lapper.intervals);
+        assert_eq!(new_lapper.max_len, insert_lapper.max_len);
+    }
+
+    // Test that inserting data ends up with the same lapper (badlapper)
+    #[test]
+    fn insert_equality_badlapper() {
+        let data: Vec<Iv> = vec![
+            Iv{start: 70, stop: 120, val: 0}, // max_len = 50
+            Iv{start: 10, stop: 15, val: 0},
+            Iv{start: 10, stop: 15, val: 0}, // exact overlap
+            Iv{start: 12, stop: 15, val: 0}, // inner overlap
+            Iv{start: 14, stop: 16, val: 0}, // overlap end
+            Iv{start: 40, stop: 45, val: 0},
+            Iv{start: 50, stop: 55, val: 0},
+            Iv{start: 60, stop: 65, val: 0},
+            Iv{start: 68, stop: 71, val: 0}, // overlap start
+            Iv{start: 70, stop: 75, val: 0},
+        ];
+        let new_lapper = Lapper::new(data.clone());
+        let mut insert_lapper = Lapper::new(vec![]);
+        for elem in data {
+            insert_lapper.insert(elem);
+        }
+        assert_eq!(new_lapper.starts, insert_lapper.starts);
+        assert_eq!(new_lapper.stops, insert_lapper.stops);
+        assert_eq!(new_lapper.intervals, insert_lapper.intervals);
+        assert_eq!(new_lapper.max_len, insert_lapper.max_len);
+    }
+
+    // Test that inserting data ends up with the same lapper (single)
+    #[test]
+    fn insert_equality_single() {
+        let data: Vec<Iv> = vec![Iv {
+            start: 10,
+            stop: 35,
+            val: 0,
+        }];
+        let new_lapper = Lapper::new(data.clone());
+        let mut insert_lapper = Lapper::new(vec![]);
+        for elem in data {
+            insert_lapper.insert(elem);
+        }
+        assert_eq!(new_lapper.starts, insert_lapper.starts);
+        assert_eq!(new_lapper.stops, insert_lapper.stops);
+        assert_eq!(new_lapper.intervals, insert_lapper.intervals);
+        assert_eq!(new_lapper.max_len, insert_lapper.max_len);
     }
 
     // Test that a query stop that hits an interval start returns no interval
     #[test]
-    fn test_query_stop_interval_start_insert() {
-        let lapper = setup_nonoverlapping_insert();
+    fn test_query_stop_interval_start() {
+        let lapper = setup_nonoverlapping();
         let mut cursor = 0;
         assert_eq!(None, lapper.find(15, 20).next());
         assert_eq!(None, lapper.seek(15, 20, &mut cursor).next());
@@ -954,35 +1027,10 @@ mod tests {
         assert_eq!(lapper.find(30, 35).count(), lapper.count(30, 35));
     }
 
-    // Test that a query start that hits an interval end returns no interval
-    #[test]
-    fn test_query_start_interval_stop_insert() {
-        let lapper = setup_nonoverlapping_insert();
-        let mut cursor = 0;
-        assert_eq!(None, lapper.find(30, 35).next());
-        assert_eq!(None, lapper.seek(30, 35, &mut cursor).next());
-        assert_eq!(lapper.find(30, 35).count(), lapper.count(30, 35));
-    }
-
     // Test that a query that overlaps the start of an interval returns that interval
     #[test]
     fn test_query_overlaps_interval_start() {
         let lapper = setup_nonoverlapping();
-        let mut cursor = 0;
-        let expected = Iv {
-            start: 20,
-            stop: 30,
-            val: 0,
-        };
-        assert_eq!(Some(&expected), lapper.find(15, 25).next());
-        assert_eq!(Some(&expected), lapper.seek(15, 25, &mut cursor).next());
-        assert_eq!(lapper.find(15, 25).count(), lapper.count(15, 25));
-    }
-
-    // Test that a query that overlaps the start of an interval returns that interval
-    #[test]
-    fn test_query_overlaps_interval_start_insert() {
-        let lapper = setup_nonoverlapping_insert();
         let mut cursor = 0;
         let expected = Iv {
             start: 20,
@@ -1062,28 +1110,6 @@ mod tests {
     }
 
     #[test]
-    fn test_overlapping_intervals_insert() {
-        let lapper = setup_overlapping_insert();
-        let mut cursor = 0;
-        let e1 = Iv {
-            start: 0,
-            stop: 15,
-            val: 0,
-        };
-        let e2 = Iv {
-            start: 10,
-            stop: 25,
-            val: 0,
-        };
-        assert_eq!(vec![&e1, &e2], lapper.find(8, 20).collect::<Vec<&Iv>>());
-        assert_eq!(
-            vec![&e1, &e2],
-            lapper.seek(8, 20, &mut cursor).collect::<Vec<&Iv>>()
-        );
-        assert_eq!(lapper.count(8, 20), 2);
-    }
-
-    #[test]
     fn test_merge_overlaps() {
         let mut lapper = setup_badlapper();
         let expected: Vec<&Iv> = vec![
@@ -1097,43 +1123,7 @@ mod tests {
         lapper.merge_overlaps();
         assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
         assert_eq!(lapper.intervals.len(), lapper.starts.len())
-    }
 
-    #[test]
-    fn test_merge_overlaps_insert() {
-        let mut lapper = setup_badlapper_insert();
-        let expected: Vec<&Iv> = vec![
-            &Iv{start: 10, stop: 16, val: 0},
-            &Iv{start: 40, stop: 45, val: 0},
-            &Iv{start: 50, stop: 55, val: 0},
-            &Iv{start: 60, stop: 65, val: 0},
-            &Iv{start: 68, stop: 120, val: 0}, // max_len = 50
-        ];
-        assert_eq!(lapper.intervals.len(), lapper.starts.len());
-        lapper.merge_overlaps();
-        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
-        assert_eq!(lapper.intervals.len(), lapper.starts.len())
-    }
-
-    #[test]
-    fn test_merge_overlaps_insert_half() {
-        let data = get_data_badlapper();
-        let (data_orig, data_insert) = data.split_at(10);
-        let mut lapper = Lapper::new(data_orig.to_vec());
-        for elem in data_insert.to_vec() {
-            lapper.insert(elem);
-        }
-        let expected: Vec<&Iv> = vec![
-            &Iv{start: 10, stop: 16, val: 0},
-            &Iv{start: 40, stop: 45, val: 0},
-            &Iv{start: 50, stop: 55, val: 0},
-            &Iv{start: 60, stop: 65, val: 0},
-            &Iv{start: 68, stop: 120, val: 0}, // max_len = 50
-        ];
-        assert_eq!(lapper.intervals.len(), lapper.starts.len());
-        lapper.merge_overlaps();
-        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
-        assert_eq!(lapper.intervals.len(), lapper.starts.len())
     }
 
     // This test was added because this breakage was found in a library user's code, where after
@@ -1172,19 +1162,6 @@ mod tests {
         assert_eq!(before, after);
 
         let mut lapper = setup_nonoverlapping();
-        lapper.set_cov();
-        assert_eq!(lapper.cov(), 50);
-    }
-
-    #[test]
-    fn test_lapper_cov_insert() {
-        let mut lapper = setup_badlapper_insert();
-        let before = lapper.cov();
-        lapper.merge_overlaps();
-        let after = lapper.cov();
-        assert_eq!(before, after);
-
-        let mut lapper = setup_nonoverlapping_insert();
         lapper.set_cov();
         assert_eq!(lapper.cov(), 50);
     }
