@@ -348,7 +348,7 @@ where
 
         for interval in &self.intervals {
             match merged.last_mut() {
-                Some(last) if last.stop >= interval.start => {
+                Some(last) if last.stop > interval.start => {
                     last.stop = std::cmp::max(last.stop, interval.stop);
                 }
                 _ => merged.push(interval.clone()),
@@ -371,7 +371,7 @@ where
 
         for interval in &self.intervals {
             match merged.last_mut() {
-                Some(last) if last.stop >= interval.start => {
+                Some(last) if last.stop > interval.start => {
                     last.stop = std::cmp::max(last.stop, interval.stop);
                     last.val = merge_fn(&last.val, &interval.val);
                 }
