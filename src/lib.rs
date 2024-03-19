@@ -77,9 +77,9 @@
 //! ```
 use num_traits::{
     identities::{one, zero},
-    PrimInt, Unsigned,
+    One, PrimInt, Unsigned,
 };
-use std::cmp::Ordering::{self};
+use std::cmp::Ordering;
 
 #[cfg(feature = "with_serde")]
 use serde::{Deserialize, Serialize};
@@ -90,7 +90,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Eq, Debug, Clone)]
 pub struct Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + One + Unsigned + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     pub start: I,
@@ -362,10 +362,7 @@ where
         self.overlaps_merged = true;
     }
 
-    /// Merges overlapping intervals, combining their values with a user-provided merge function.
-    ///
-    /// Adjacent or overlapping intervals are consolidated into single intervals, with their values
-    /// merged using the provided `merge_fn`.
+    /// Processes overlapping intervals by splitting and merging them based on a custom merge function.
     pub fn merge_overlaps_with<F>(&mut self, merge_fn: F)
     where
         F: Fn(&T, &T) -> T,
@@ -389,75 +386,64 @@ where
         self.overlaps_merged = true;
     }
 
-    // TODO: Has issues with exact overlaps
-    /// Processes overlapping intervals by splitting and merging, using a user-provided merge function.
-    ///
-    /// This method handles overlapping intervals by:
-    /// - Creating new intervals for each overlap, applying `merge_fn` to their values.
-    /// - Preserving non-overlapping parts as individual intervals.
-    pub fn split_and_merge_overlaps_with<F>(&mut self, merge_fn: F)
+    /// Divides a set of overlapping intervals into non-overlapping intervals,
+    /// aggregating associated data for each resulting interval using a custom merge function.
+    // Based on: https://stackoverflow.com/questions/628837/how-to-divide-a-set-of-overlapping-ranges-into-non-overlapping-ranges
+    pub fn divide_overlaps_with<F>(&mut self, merge_fn: F)
     where
-        F: Fn(&T, &T) -> T,
+        F: Fn(&Vec<T>) -> T,
     {
-        let mut merged: Vec<Interval<I, T>> = Vec::new();
-        let mut current_interval_option: Option<Interval<I, T>> = None;
-
+        let mut events: Vec<(I, bool, I, T)> = Vec::new();
         for interval in &self.intervals {
-            if let Some(mut current_interval) = current_interval_option.take() {
-                // No overlap; add the new interval as is
-                if current_interval.stop <= interval.start {
-                    merged.push(current_interval);
-                    current_interval_option = Some(interval.clone());
-                }
-                // Overlap
-                else {
-                    let overlap_start = std::cmp::max(current_interval.start, interval.start);
-                    let overlap_end = std::cmp::min(current_interval.stop, interval.stop);
+            events.push((interval.start, true, interval.stop, interval.val.clone()));
+            events.push((interval.stop, false, interval.start, interval.val.clone()));
+        }
 
-                    // Leading non-overlapping part
-                    if current_interval.start < overlap_start {
-                        merged.push(Interval {
-                            start: current_interval.start,
-                            stop: overlap_start,
-                            val: current_interval.val.clone(),
-                        });
-                    }
+        events.sort_by(|a, b| {
+            a.0.cmp(&b.0).then_with(|| {
+                let order_a = if a.1 { 0 } else { 1 };
+                let order_b = if b.1 { 0 } else { 1 };
+                order_a.cmp(&order_b).then_with(|| a.2.cmp(&b.2))
+            })
+        });
 
-                    // Overlapping part
-                    merged.push(Interval {
-                        start: overlap_start,
-                        stop: overlap_end,
-                        val: merge_fn(&current_interval.val, &interval.val),
+        let mut current_values: Vec<T> = Vec::new();
+        let mut ranges: Vec<Interval<I, T>> = Vec::new();
+        let mut current_start = None;
+
+        for (endpoint, is_start, _, symbol) in events {
+            match (is_start, current_start) {
+                (true, Some(start)) if endpoint != start && !current_values.is_empty() => {
+                    ranges.push(Interval {
+                        start,
+                        stop: endpoint - I::one(),
+                        val: merge_fn(&current_values),
                     });
-
-                    // Check for trailing non-overlapping part
-                    if interval.stop > overlap_end {
-                        current_interval_option = Some(Interval {
-                            start: overlap_end,
-                            stop: interval.stop,
-                            val: interval.val.clone(),
-                        });
-                    }
-
-                    // If current_interval extends beyond interval, update its start to reflect processed part
-                    if current_interval.stop > overlap_end {
-                        current_interval.start = overlap_end;
-                        current_interval_option = Some(current_interval);
-                    }
+                    current_start = Some(endpoint);
                 }
+                (true, _) => {
+                    current_start = Some(endpoint);
+                }
+                (false, Some(start)) if !current_values.is_empty() => {
+                    ranges.push(Interval {
+                        start,
+                        stop: endpoint,
+                        val: merge_fn(&current_values),
+                    });
+                    current_start = Some(endpoint + I::one());
+                }
+                _ => {}
             }
-            // No ongoing interval, so we start with this one
-            else {
-                current_interval_option = Some(interval.clone());
+
+            if is_start {
+                current_values.push(symbol);
+            } else {
+                current_values.retain(|v| v != &symbol);
+                current_start = Some(endpoint + I::one());
             }
         }
 
-        // Check if there's a remaining interval to push into merged
-        if let Some(current_interval) = current_interval_option {
-            merged.push(current_interval);
-        }
-
-        self.intervals = merged;
+        self.intervals = ranges;
         self.update_auxiliary_structures();
         self.overlaps_merged = true;
     }
@@ -1232,115 +1218,139 @@ mod tests {
     }
 
     #[test]
-    fn test_split_and_merge_overlaps_badlapper() {
-        let mut lapper = setup_badlapper();
-        let expected: Vec<&Iv> = vec![
-           &Iv { start: 10, stop: 12, val: 1 },
-           &Iv { start: 12, stop: 14, val: 2 },
-           &Iv { start: 14, stop: 15, val: 3 },
-           &Iv { start: 15, stop: 16, val: 1 },
-           &Iv { start: 40, stop: 45, val: 0 },
-           &Iv { start: 50, stop: 55, val: 0 },
-           &Iv { start: 60, stop: 65, val: 0 },
-           &Iv { start: 68, stop: 70, val: 0 },
-           &Iv { start: 70, stop: 71, val: 1 },
-           &Iv { start: 71, stop: 75, val: 1 },
-           &Iv { start: 75, stop: 120, val: 0 },
-        ];
-        assert_eq!(lapper.intervals.len(), lapper.starts.len());
-        lapper.split_and_merge_overlaps_with(|a: &u32, _b: &u32| -> u32 { *a + 1 });
-        println!("{:?}", lapper.iter().collect::<Vec<&Iv>>());
-        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
-        assert_eq!(lapper.intervals.len(), lapper.starts.len());
-    }
-
-    #[test]
-    fn test_split_and_merge_overlaps() {
-        let mut lapper = Lapper::new(vec![
-            Iv { start: 1, stop: 5, val: 10 },
-            Iv { start: 3, stop: 7, val: 20 },
-            Iv { start: 6, stop: 9, val: 30 },
+    fn test_divide_overlaps_with() {
+        let mut lapper : Lapper<u32, String> = Lapper::new(vec![
+            Interval { start: 1, stop: 5, val: String::from("a") },
+            Interval { start: 3, stop: 7, val: String::from("b") },
+            Interval { start: 6, stop: 9, val: String::from("c") },
         ]);
-        let expected: Vec<&Iv> = vec![
-            &Iv { start: 1, stop: 3, val: 10 },
-            &Iv { start: 3, stop: 5, val: 30 },
-            &Iv { start: 5, stop: 6, val: 20 },
-            &Iv { start: 6, stop: 7, val: 50 },
-            &Iv { start: 7, stop: 9, val: 30 },
+        let expected: Vec<Interval<u32, String>> = vec![
+            Interval { start: 1, stop: 2, val: String::from("a") },
+            Interval { start: 3, stop: 5, val: String::from("a, b") },
+            Interval { start: 6, stop: 7, val: String::from("b, c") },
+            Interval { start: 8, stop: 9, val: String::from("c") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
-        lapper.split_and_merge_overlaps_with(|a, b| a + b);
-        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
+        lapper.divide_overlaps_with(|overlap| overlap
+            .iter()
+            .fold(String::new(), |acc, x| acc + x + ", ")
+            .trim_end_matches(", ").to_string());
+        assert_eq!(expected, lapper.iter().cloned().collect::<Vec<_>>());
         assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
     }
 
+    // Testcase from:
+    // https://stackoverflow.com/questions/628837/how-to-divide-a-set-of-overlapping-ranges-into-non-overlapping-ranges
     #[test]
-    fn test_split_and_merge_overlaps_with_contained_interval() {
-        let mut lapper = Lapper::new(vec![
-            Iv { start: 1, stop: 10, val: 15 },
-            Iv { start: 3, stop: 7, val: 5 },
+    fn test_divide_overlaps_with_stackoverflow() {
+        let mut lapper: Lapper<u32, String> = Lapper::new(vec![
+            Interval { start: 0, stop: 100, val: String::from("a") },
+            Interval { start: 0, stop: 75, val: String::from("b") },
+            Interval { start: 75, stop: 80, val: String::from("d") },
+            Interval {start: 95, stop: 150, val: String::from("c")},
+            Interval {start: 120, stop: 130, val: String::from("d")},
+            Interval {start: 160, stop: 175, val: String::from("e")},
+            Interval {start: 165, stop: 180, val: String::from("a")},
         ]);
-        let expected: Vec<&Iv> = vec![
-            &Iv { start: 1, stop: 3, val: 15 },
-            &Iv { start: 3, stop: 7, val: 20 },
-            &Iv { start: 7, stop: 10, val: 15 },
+        let expected: Vec<Interval<u32, String>> = vec![
+            Interval { start: 0, stop: 74, val: String::from("b, a") },
+            Interval { start: 75, stop: 75, val: String::from("b, a, d") },
+            Interval { start: 76, stop: 80, val: String::from("a, d") },
+            Interval {start: 81, stop: 94, val: String::from("a")},
+            Interval {start: 95, stop: 100, val: String::from("a, c")},
+            Interval {start: 101, stop: 119, val: String::from("c")},
+            Interval {start: 120, stop: 130, val: String::from("c, d")},
+            Interval {start: 131, stop: 150, val: String::from("c")},
+            Interval {start: 160, stop: 164, val: String::from("e")},
+            Interval {start: 165, stop: 175, val: String::from("e, a")},
+            Interval {start: 176, stop: 180, val: String::from("a")},
         ];
-        assert_eq!(lapper.intervals.len(), lapper.starts.len());
-        lapper.split_and_merge_overlaps_with(|a, b| a + b);
-        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
+        assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
+        lapper.divide_overlaps_with(|overlap| overlap
+            .iter()
+            .fold(String::new(), |acc, x| acc + x + ", ")
+            .trim_end_matches(", ").to_string());
+        assert_eq!(expected, lapper.iter().cloned().collect::<Vec<_>>());
         assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
     }
 
     #[test]
-    fn test_split_and_merge_overlaps_with_non_overlapping_intervals() {
+    fn test_divide_overlaps_with_contained_interval() {
         let mut lapper = Lapper::new(vec![
-            Iv { start: 1, stop: 2, val: 10 },
-            Iv { start: 3, stop: 4, val: 20 },
-            Iv { start: 5, stop: 6, val: 30 },
+            Interval { start: 1, stop: 10, val: String::from("a") },
+            Interval { start: 3, stop: 7, val: String::from("b") },
         ]);
-        let expected: Vec<&Iv> = vec![
-            &Iv { start: 1, stop: 2, val: 10 },
-            &Iv { start: 3, stop: 4, val: 20 },
-            &Iv { start: 5, stop: 6, val: 30 },
+        let expected: Vec<Interval<u32, String>> = vec![
+            Interval { start: 1, stop: 2, val: String::from("a") },
+            Interval { start: 3, stop: 7, val: String::from("a, b") },
+            Interval { start: 8, stop: 10, val: String::from("a") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
-        lapper.split_and_merge_overlaps_with(|a, b| a + b);
-        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
+        lapper.divide_overlaps_with(|overlap| overlap
+            .iter()
+            .fold(String::new(), |acc, x| acc + x + ", ")
+            .trim_end_matches(", ").to_string());
+        assert_eq!(expected, lapper.iter().cloned().collect::<Vec<_>>());
+        assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
+    }
+
+    #[test]
+    fn test_divide_overlaps_with_non_overlapping_intervals() {
+        let mut lapper = Lapper::new(vec![
+            Interval { start: 1, stop: 2, val: String::from("a") },
+            Interval { start: 3, stop: 4, val: String::from("b") },
+        ]);
+        let expected: Vec<Interval<u32, String>> = vec![
+            Interval { start: 1, stop: 2, val: String::from("a") },
+            Interval { start: 3, stop: 4, val: String::from("b") },
+        ];
+        assert_eq!(lapper.intervals.len(), lapper.starts.len());
+        lapper.divide_overlaps_with(|overlap| overlap
+            .iter()
+            .fold(String::new(), |acc, x| acc + x + ", ")
+            .trim_end_matches(", ").to_string());
+        assert_eq!(expected, lapper.iter().cloned().collect::<Vec<_>>());
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
     }
 
     #[test]
-    fn test_split_and_merge_overlaps_with_partial_overlap() {
+    fn test_divide_overlaps_with_partial_overlap() {
         let mut lapper = Lapper::new(vec![
-            Iv { start: 1, stop: 4, val: 10 },
-            Iv { start: 3, stop: 6, val: 20 },
+            Interval { start: 1, stop: 4, val: String::from("a") },
+            Interval { start: 3, stop: 6, val: String::from("b") },
         ]);
-        let expected: Vec<&Iv> = vec![
-            &Iv { start: 1, stop: 3, val: 10 },
-            &Iv { start: 3, stop: 4, val: 30 },
-            &Iv { start: 4, stop: 6, val: 20 },
+        let expected: Vec<Interval<u32, String>> = vec![
+            Interval { start: 1, stop: 2, val: String::from("a") },
+            Interval { start: 3, stop: 4, val: String::from("a, b") },
+            Interval { start: 5, stop: 6, val: String::from("b") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
-        lapper.split_and_merge_overlaps_with(|a, b| a + b);
-        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
+        lapper.divide_overlaps_with(|overlap| overlap
+            .iter()
+            .fold(String::new(), |acc, x| acc + x + ", ")
+            .trim_end_matches(", ").to_string());
+        assert_eq!(expected, lapper.iter().cloned().collect::<Vec<_>>());
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
     }
 
     #[test]
-    fn test_split_and_merge_overlaps_with_exact_overlap() {
+    fn test_divide_overlaps_with_exact_overlap() {
         let mut lapper = Lapper::new(vec![
-            Iv { start: 1, stop: 4, val: 10 },
-            Iv { start: 1, stop: 4, val: 10 },
-            Iv { start: 3, stop: 6, val: 20 },
+            Interval { start: 1, stop: 4, val: String::from("a") },
+            Interval { start: 1, stop: 4, val: String::from("b") },
+            Interval { start: 3, stop: 6, val: String::from("c") },
         ]);
-        let expected: Vec<&Iv> = vec![
-            &Iv { start: 1, stop: 3, val: 20 }, 
-            &Iv { start: 3, stop: 4, val: 40 }, 
-            &Iv { start: 4, stop: 6, val: 20 }, 
+        let expected: Vec<Interval<u32, String>> = vec![
+            Interval { start: 1, stop: 2, val: String::from("a, b") },
+            Interval { start: 3, stop: 4, val: String::from("a, b, c") },
+            Interval { start: 5, stop: 6, val: String::from("c") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
-        lapper.split_and_merge_overlaps_with(|a, b| a + b);
-        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
+        lapper.divide_overlaps_with(|overlap| overlap
+            .iter()
+            .fold(String::new(), |acc, x| acc + x + ", ")
+            .trim_end_matches(", ").to_string());
+        assert_eq!(expected, lapper.iter().cloned().collect::<Vec<_>>());
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
     }
 
