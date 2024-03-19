@@ -401,9 +401,9 @@ where
         }
 
         events.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-                .then_with(|| a.1.cmp(&b.1))
-                .then_with(|| a.2.cmp(&b.2))
+            a.0.cmp(&b.0) // First, sort by endpoint
+                .then_with(|| (!a.1 as u8).cmp(&(!b.1 as u8))) // Then, start events before end events
+                .then_with(|| a.2.cmp(&b.2)) // Finally, sort by the other endpoint if needed
         });
 
         let mut active_indices: Vec<usize> = Vec::new();
@@ -415,7 +415,8 @@ where
             if is_start {
                 if let Some(start) = current_start {
                     // Merge and push the interval if it doesn't overlap directly with its predecessor
-                    if endpoint != start && !active_indices.is_empty() {
+                    if endpoint != start && endpoint - I::one() >= start && active_indices.len() > 0
+                    {
                         let values = active_indices
                             .iter()
                             .map(|&i| &self.intervals[i].val)
@@ -435,17 +436,19 @@ where
             }
             // Handle the end of an interval
             else {
-                // Always create an interval up to the current endpoint
+                // Create an interval up to the current endpoint
                 if let Some(start) = current_start {
-                    let values = active_indices
-                        .iter()
-                        .map(|&i| &self.intervals[i].val)
-                        .collect::<Vec<_>>();
-                    ranges.push(Interval {
-                        start,
-                        stop: endpoint,
-                        val: merge_fn(&values),
-                    });
+                    if endpoint >= start && active_indices.len() > 0 {
+                        let values = active_indices
+                            .iter()
+                            .map(|&i| &self.intervals[i].val)
+                            .collect::<Vec<_>>();
+                        ranges.push(Interval {
+                            start,
+                            stop: endpoint,
+                            val: merge_fn(&values),
+                        });
+                    }
                 }
 
                 // Remove ended interval
