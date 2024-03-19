@@ -387,7 +387,7 @@ where
     /// Helper method to update starts, stops, and max_len based on the current state of intervals.
     fn update_auxiliary_structures(&mut self) {
         let (mut starts, mut stops): (Vec<_>, Vec<_>) =
-            self.intervals.iter().map(|x| (x.start, x.stop)).unzip();
+            self.intervals.iter().map(|iv| (iv.start, iv.stop)).unzip();
         starts.sort();
         stops.sort();
         self.max_len = self
