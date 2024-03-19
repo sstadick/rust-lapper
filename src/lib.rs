@@ -80,7 +80,6 @@ use num_traits::{
     PrimInt, Unsigned,
 };
 use std::cmp::Ordering::{self};
-use std::collections::VecDeque;
 
 #[cfg(feature = "with_serde")]
 use serde::{Deserialize, Serialize};
@@ -345,45 +344,56 @@ where
     /// Merge any intervals that overlap with eachother within the Lapper. This is an easy way to
     /// speed up queries.
     pub fn merge_overlaps(&mut self) {
-        let mut stack: VecDeque<&mut Interval<I, T>> = VecDeque::new();
-        let mut ivs = self.intervals.iter_mut();
-        if let Some(first) = ivs.next() {
-            stack.push_back(first);
-            for interval in ivs {
-                let mut top = stack.pop_back().unwrap();
-                if top.stop < interval.start {
-                    stack.push_back(top);
-                    stack.push_back(interval);
-                } else if top.stop < interval.stop {
-                    top.stop = interval.stop;
-                    //stack.pop_back();
-                    stack.push_back(top);
-                } else {
-                    // they were equal
-                    stack.push_back(top);
+        let mut merged: Vec<Interval<I, T>> = Vec::new();
+
+        for interval in &self.intervals {
+            match merged.last_mut() {
+                Some(last) if last.stop >= interval.start => {
+                    last.stop = std::cmp::max(last.stop, interval.stop);
                 }
+                _ => merged.push(interval.clone()),
             }
-            self.overlaps_merged = true;
-            self.intervals = stack
-                .into_iter()
-                .map(|x| Interval {
-                    start: x.start,
-                    stop: x.stop,
-                    val: x.val.clone(),
-                })
-                .collect();
         }
-        // Fix the starts and stops used by counts
+
+        self.intervals = merged;
+        self.update_auxiliary_structures();
+        self.overlaps_merged = true;
+    }
+
+    /// Merge any intervals that overlap within the Lapper, using a user-provided merge function
+    /// for the values of overlapping intervals. This is an easy way to speed up queries and
+    /// customize how interval values are combined.
+    pub fn merge_overlaps_with<F>(&mut self, merge_fn: F)
+    where
+        F: Fn(&T, &T) -> T,
+    {
+        let mut merged: Vec<Interval<I, T>> = Vec::new();
+
+        for interval in &self.intervals {
+            match merged.last_mut() {
+                Some(last) if last.stop >= interval.start => {
+                    last.stop = std::cmp::max(last.stop, interval.stop);
+                    last.val = merge_fn(&last.val, &interval.val);
+                }
+                _ => merged.push(interval.clone()),
+            }
+        }
+
+        self.intervals = merged;
+        self.update_auxiliary_structures();
+        self.overlaps_merged = true;
+    }
+
+    /// Helper method to update starts, stops, and max_len based on the current state of intervals.
+    fn update_auxiliary_structures(&mut self) {
         let (mut starts, mut stops): (Vec<_>, Vec<_>) =
             self.intervals.iter().map(|x| (x.start, x.stop)).unzip();
         starts.sort();
         stops.sort();
-        self.starts = starts;
-        self.stops = stops;
         self.max_len = self
             .intervals
             .iter()
-            .map(|x| x.stop.checked_sub(&x.start).unwrap_or_else(zero::<I>))
+            .map(|iv| iv.stop.checked_sub(&iv.start).unwrap_or_else(zero::<I>))
             .max()
             .unwrap_or_else(zero::<I>);
     }
@@ -1123,7 +1133,23 @@ mod tests {
         lapper.merge_overlaps();
         assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
         assert_eq!(lapper.intervals.len(), lapper.starts.len())
+    }
 
+    #[test]
+    fn test_merge_overlaps_with() {
+        let mut lapper = setup_badlapper();
+        let merge_fn = |a: &u32, _b: &u32| -> u32 { *a + 1 };
+        let expected : Vec<&Iv> = vec![
+            &Iv{ start: 10, stop: 16, val: 3 }, // 3 overlaps, initial val = 0, +3 overlaps
+            &Iv{ start: 40, stop: 45, val: 0 }, // No overlap, val remains 0
+            &Iv{ start: 50, stop: 55, val: 0 }, // No overlap, val remains 0
+            &Iv{ start: 60, stop: 65, val: 0 }, // No overlap, val remains 0
+            &Iv{ start: 68, stop: 120, val: 2 }, // 2 overlaps, initial val = 0, +2 overlaps
+        ];
+        assert_eq!(lapper.intervals.len(), lapper.starts.len());
+        lapper.merge_overlaps_with(merge_fn);
+        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
+        assert_eq!(lapper.intervals.len(), lapper.starts.len())
     }
 
     // This test was added because this breakage was found in a library user's code, where after
