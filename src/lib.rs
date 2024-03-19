@@ -391,54 +391,66 @@ where
     // Based on: https://stackoverflow.com/questions/628837/how-to-divide-a-set-of-overlapping-ranges-into-non-overlapping-ranges
     pub fn divide_overlaps_with<F>(&mut self, merge_fn: F)
     where
-        F: Fn(&Vec<T>) -> T,
+        F: Fn(&[&T]) -> T,
     {
-        let mut events: Vec<(I, bool, I, T)> = Vec::new();
-        for interval in &self.intervals {
-            events.push((interval.start, true, interval.stop, interval.val.clone()));
-            events.push((interval.stop, false, interval.start, interval.val.clone()));
+        // Create start and end events for each interval
+        let mut events: Vec<(I, bool, I, usize)> = Vec::new();
+        for (index, interval) in self.intervals.iter().enumerate() {
+            events.push((interval.start, true, interval.stop, index)); // Start event
+            events.push((interval.stop, false, interval.start, index)); // End event
         }
 
         events.sort_by(|a, b| {
-            a.0.cmp(&b.0).then_with(|| {
-                let order_a = if a.1 { 0 } else { 1 };
-                let order_b = if b.1 { 0 } else { 1 };
-                order_a.cmp(&order_b).then_with(|| a.2.cmp(&b.2))
-            })
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.cmp(&b.1))
+                .then_with(|| a.2.cmp(&b.2))
         });
 
-        let mut current_values: Vec<T> = Vec::new();
+        let mut active_indices: Vec<usize> = Vec::new();
         let mut ranges: Vec<Interval<I, T>> = Vec::new();
-        let mut current_start = None;
+        let mut current_start: Option<I> = None;
 
-        for (endpoint, is_start, _, symbol) in events {
-            match (is_start, current_start) {
-                (true, Some(start)) if endpoint != start && !current_values.is_empty() => {
-                    ranges.push(Interval {
-                        start,
-                        stop: endpoint - I::one(),
-                        val: merge_fn(&current_values),
-                    });
-                    current_start = Some(endpoint);
+        for (endpoint, is_start, _, index) in events {
+            // Handle the start of an interval
+            if is_start {
+                if let Some(start) = current_start {
+                    // Merge and push the interval if it doesn't overlap directly with its predecessor
+                    if endpoint != start && !active_indices.is_empty() {
+                        let values = active_indices
+                            .iter()
+                            .map(|&i| &self.intervals[i].val)
+                            .collect::<Vec<_>>();
+                        ranges.push(Interval {
+                            start,
+                            stop: endpoint - I::one(),
+                            val: merge_fn(&values),
+                        });
+                    }
                 }
-                (true, _) => {
-                    current_start = Some(endpoint);
-                }
-                (false, Some(start)) if !current_values.is_empty() => {
+
+                // Update the start for a new or continued interval
+                current_start = Some(endpoint);
+                // Add index to active intervals
+                active_indices.push(index);
+            }
+            // Handle the end of an interval
+            else {
+                // Always create an interval up to the current endpoint
+                if let Some(start) = current_start {
+                    let values = active_indices
+                        .iter()
+                        .map(|&i| &self.intervals[i].val)
+                        .collect::<Vec<_>>();
                     ranges.push(Interval {
                         start,
                         stop: endpoint,
-                        val: merge_fn(&current_values),
+                        val: merge_fn(&values),
                     });
-                    current_start = Some(endpoint + I::one());
                 }
-                _ => {}
-            }
 
-            if is_start {
-                current_values.push(symbol);
-            } else {
-                current_values.retain(|v| v != &symbol);
+                // Remove ended interval
+                active_indices.retain(|&i| i != index);
+                // Prepare for the next potential interval start
                 current_start = Some(endpoint + I::one());
             }
         }
