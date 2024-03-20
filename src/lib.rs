@@ -77,7 +77,7 @@
 //! ```
 use num_traits::{
     identities::{one, zero},
-    One, PrimInt, Unsigned,
+    PrimInt, Unsigned,
 };
 use std::cmp::Ordering;
 
@@ -85,12 +85,12 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 /// Represent a range from [start, stop)
-/// Inclusive start, exclusive of stop
+/// Inclusive start, exclusive of stop (start <= x < end)
 #[cfg_attr(feature = "with_serde", derive(Serialize, Deserialize))]
 #[derive(Eq, Debug, Clone)]
 pub struct Interval<I, T>
 where
-    I: PrimInt + One + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     pub start: I,
@@ -415,22 +415,19 @@ where
             if is_start {
                 if let Some(start) = current_start {
                     // Merge and push the interval if it doesn't overlap directly with its predecessor
-                    if endpoint != start && endpoint - I::one() >= start && active_indices.len() > 0
-                    {
+                    if endpoint > start && active_indices.len() > 0 {
                         let values = active_indices
                             .iter()
                             .map(|&i| &self.intervals[i].val)
                             .collect::<Vec<_>>();
                         ranges.push(Interval {
                             start,
-                            stop: endpoint - I::one(),
+                            stop: endpoint,
                             val: merge_fn(&values),
                         });
                     }
                 }
 
-                // Update the start for a new or continued interval
-                current_start = Some(endpoint);
                 // Add index to active intervals
                 active_indices.push(index);
             }
@@ -438,7 +435,7 @@ where
             else {
                 // Create an interval up to the current endpoint
                 if let Some(start) = current_start {
-                    if endpoint >= start && active_indices.len() > 0 {
+                    if endpoint > start && active_indices.len() > 0 {
                         let values = active_indices
                             .iter()
                             .map(|&i| &self.intervals[i].val)
@@ -453,9 +450,10 @@ where
 
                 // Remove ended interval
                 active_indices.retain(|&i| i != index);
-                // Prepare for the next potential interval start
-                current_start = Some(endpoint + I::one());
             }
+
+            // Update the start for a new or continued interval
+            current_start = Some(endpoint);
         }
 
         self.intervals = ranges;
@@ -1240,10 +1238,11 @@ mod tests {
             Interval { start: 6, stop: 9, val: String::from("c") },
         ]);
         let expected: Vec<Interval<u32, String>> = vec![
-            Interval { start: 1, stop: 2, val: String::from("a") },
+            Interval { start: 1, stop: 3, val: String::from("a") },
             Interval { start: 3, stop: 5, val: String::from("a, b") },
+            Interval { start: 5, stop: 6, val: String::from("b") },
             Interval { start: 6, stop: 7, val: String::from("b, c") },
-            Interval { start: 8, stop: 9, val: String::from("c") },
+            Interval { start: 7, stop: 9, val: String::from("c") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
         lapper.divide_overlaps_with(|overlap| overlap
@@ -1268,17 +1267,16 @@ mod tests {
             Interval {start: 165, stop: 180, val: String::from("a")},
         ]);
         let expected: Vec<Interval<u32, String>> = vec![
-            Interval { start: 0, stop: 74, val: String::from("b, a") },
-            Interval { start: 75, stop: 75, val: String::from("b, a, d") },
-            Interval { start: 76, stop: 80, val: String::from("a, d") },
-            Interval {start: 81, stop: 94, val: String::from("a")},
+            Interval { start: 0, stop: 75, val: String::from("b, a") },
+            Interval { start: 75, stop: 80, val: String::from("a, d") },
+            Interval {start: 80, stop: 95, val: String::from("a")},
             Interval {start: 95, stop: 100, val: String::from("a, c")},
-            Interval {start: 101, stop: 119, val: String::from("c")},
+            Interval {start: 100, stop: 120, val: String::from("c")},
             Interval {start: 120, stop: 130, val: String::from("c, d")},
-            Interval {start: 131, stop: 150, val: String::from("c")},
-            Interval {start: 160, stop: 164, val: String::from("e")},
+            Interval {start: 130, stop: 150, val: String::from("c")},
+            Interval {start: 160, stop: 165, val: String::from("e")},
             Interval {start: 165, stop: 175, val: String::from("e, a")},
-            Interval {start: 176, stop: 180, val: String::from("a")},
+            Interval {start: 175, stop: 180, val: String::from("a")},
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
         lapper.divide_overlaps_with(|overlap| overlap
@@ -1296,9 +1294,9 @@ mod tests {
             Interval { start: 3, stop: 7, val: String::from("b") },
         ]);
         let expected: Vec<Interval<u32, String>> = vec![
-            Interval { start: 1, stop: 2, val: String::from("a") },
+            Interval { start: 1, stop: 3, val: String::from("a") },
             Interval { start: 3, stop: 7, val: String::from("a, b") },
-            Interval { start: 8, stop: 10, val: String::from("a") },
+            Interval { start: 7, stop: 10, val: String::from("a") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
         lapper.divide_overlaps_with(|overlap| overlap
@@ -1335,9 +1333,9 @@ mod tests {
             Interval { start: 3, stop: 6, val: String::from("b") },
         ]);
         let expected: Vec<Interval<u32, String>> = vec![
-            Interval { start: 1, stop: 2, val: String::from("a") },
+            Interval { start: 1, stop: 3, val: String::from("a") },
             Interval { start: 3, stop: 4, val: String::from("a, b") },
-            Interval { start: 5, stop: 6, val: String::from("b") },
+            Interval { start: 4, stop: 6, val: String::from("b") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
         lapper.divide_overlaps_with(|overlap| overlap
@@ -1356,9 +1354,9 @@ mod tests {
             Interval { start: 3, stop: 6, val: String::from("c") },
         ]);
         let expected: Vec<Interval<u32, String>> = vec![
-            Interval { start: 1, stop: 2, val: String::from("a, b") },
+            Interval { start: 1, stop: 3, val: String::from("a, b") },
             Interval { start: 3, stop: 4, val: String::from("a, b, c") },
-            Interval { start: 5, stop: 6, val: String::from("c") },
+            Interval { start: 4, stop: 6, val: String::from("c") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
         lapper.divide_overlaps_with(|overlap| overlap
