@@ -87,11 +87,11 @@ use serde::{Deserialize, Serialize};
 /// Represent a range from [start, stop)
 /// Inclusive start, exclusive of stop (start <= x < end)
 #[cfg_attr(feature = "with_serde", derive(Serialize, Deserialize))]
-#[derive(Eq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Interval<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    T: Clone + Send + Sync,
 {
     pub start: I,
     pub stop: I,
@@ -105,7 +105,7 @@ where
 pub struct Lapper<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    T: Clone + Send + Sync,
 {
     /// List of intervals
     pub intervals: Vec<Interval<I, T>>,
@@ -124,7 +124,7 @@ where
 impl<I, T> Interval<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    T: Clone + Send + Sync,
 {
     /// Compute the intsect between two intervals
     #[inline]
@@ -141,36 +141,10 @@ where
     }
 }
 
-impl<I, T> Ord for Interval<I, T>
-where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
-{
-    #[inline]
-    fn cmp(&self, other: &Interval<I, T>) -> Ordering {
-        match self.start.cmp(&other.start) {
-            Ordering::Less => Ordering::Less,
-            Ordering::Greater => Ordering::Greater,
-            Ordering::Equal => self.stop.cmp(&other.stop),
-        }
-    }
-}
-
-impl<I, T> PartialOrd for Interval<I, T>
-where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
-{
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl<I, T> PartialEq for Interval<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    T: Clone + Send + Sync,
 {
     #[inline]
     fn eq(&self, other: &Interval<I, T>) -> bool {
@@ -178,10 +152,24 @@ where
     }
 }
 
+impl<I, T> PartialOrd for Interval<I, T>
+where
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    T: Clone + Send + Sync,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(match self.start.cmp(&other.start) {
+            Ordering::Less => Ordering::Less,
+            Ordering::Greater => Ordering::Greater,
+            Ordering::Equal => self.stop.cmp(&other.stop),
+        })
+    }
+}
+
 impl<I, T> Lapper<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    T: Clone + Send + Sync,
 {
     /// Create a new instance of Lapper by passing in a vector of Intervals. This vector will
     /// immediately be sorted by start order.
@@ -193,7 +181,7 @@ where
     /// let lapper = Lapper::new(data);
     /// ```
     pub fn new(mut intervals: Vec<Interval<I, T>>) -> Self {
-        intervals.sort();
+        intervals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
         let (mut starts, mut stops): (Vec<_>, Vec<_>) =
             intervals.iter().map(|x| (x.start, x.stop)).unzip();
         starts.sort();
@@ -761,7 +749,7 @@ where
 #[derive(Debug)]
 pub struct IterFind<'a, I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     inner: &'a Lapper<I, T>,
@@ -772,7 +760,7 @@ where
 
 impl<'a, I, T> Iterator for IterFind<'a, I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
@@ -799,7 +787,7 @@ where
 #[derive(Debug)]
 pub struct IterDepth<'a, I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     inner: &'a Lapper<I, T>,
@@ -812,7 +800,7 @@ where
 
 impl<'a, I, T> Iterator for IterDepth<'a, I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     type Item = Interval<I, I>;
@@ -863,7 +851,7 @@ where
 /// Lapper Iterator
 pub struct IterLapper<'a, I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     inner: &'a Lapper<I, T>,
@@ -872,7 +860,7 @@ where
 
 impl<'a, I, T> Iterator for IterLapper<'a, I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
@@ -889,7 +877,7 @@ where
 
 impl<I, T> IntoIterator for Lapper<I, T>
 where
-    T: Eq + Clone + Send + Sync,
+    T: Clone + Send + Sync,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     type Item = Interval<I, T>;
@@ -902,7 +890,7 @@ where
 
 impl<'a, I, T> IntoIterator for &'a Lapper<I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
@@ -915,7 +903,7 @@ where
 
 impl<'a, I, T> IntoIterator for &'a mut Lapper<I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     type Item = &'a mut Interval<I, T>;
