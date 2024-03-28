@@ -379,7 +379,7 @@ where
     // Based on: https://stackoverflow.com/questions/628837/how-to-divide-a-set-of-overlapping-ranges-into-non-overlapping-ranges
     pub fn divide_overlaps_with<F>(&mut self, merge_fn: F)
     where
-        F: Fn(&[&T]) -> T,
+        F: Fn(&[&T], std::ops::Range<I>) -> T,
     {
         // Create start and end events for each interval
         let mut events: Vec<(I, bool, I, usize)> = Vec::new();
@@ -411,7 +411,7 @@ where
                         ranges.push(Interval {
                             start,
                             stop: endpoint,
-                            val: merge_fn(&values),
+                            val: merge_fn(&values, start..endpoint),
                         });
                     }
                 }
@@ -431,7 +431,7 @@ where
                         ranges.push(Interval {
                             start,
                             stop: endpoint,
-                            val: merge_fn(&values),
+                            val: merge_fn(&values, start..endpoint),
                         });
                     }
                 }
@@ -1233,7 +1233,7 @@ mod tests {
             Interval { start: 7, stop: 9, val: String::from("c") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
-        lapper.divide_overlaps_with(|overlap| overlap
+        lapper.divide_overlaps_with(|overlap, _| overlap
             .iter()
             .fold(String::new(), |acc, x| acc + x + ", ")
             .trim_end_matches(", ").to_string());
@@ -1267,7 +1267,7 @@ mod tests {
             Interval {start: 175, stop: 180, val: String::from("a")},
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
-        lapper.divide_overlaps_with(|overlap| overlap
+        lapper.divide_overlaps_with(|overlap, _| overlap
             .iter()
             .fold(String::new(), |acc, x| acc + x + ", ")
             .trim_end_matches(", ").to_string());
@@ -1287,7 +1287,7 @@ mod tests {
             Interval { start: 7, stop: 10, val: String::from("a") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
-        lapper.divide_overlaps_with(|overlap| overlap
+        lapper.divide_overlaps_with(|overlap, _| overlap
             .iter()
             .fold(String::new(), |acc, x| acc + x + ", ")
             .trim_end_matches(", ").to_string());
@@ -1306,7 +1306,7 @@ mod tests {
             Interval { start: 3, stop: 4, val: String::from("b") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
-        lapper.divide_overlaps_with(|overlap| overlap
+        lapper.divide_overlaps_with(|overlap, _| overlap
             .iter()
             .fold(String::new(), |acc, x| acc + x + ", ")
             .trim_end_matches(", ").to_string());
@@ -1326,7 +1326,7 @@ mod tests {
             Interval { start: 4, stop: 6, val: String::from("b") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
-        lapper.divide_overlaps_with(|overlap| overlap
+        lapper.divide_overlaps_with(|overlap, _| overlap
             .iter()
             .fold(String::new(), |acc, x| acc + x + ", ")
             .trim_end_matches(", ").to_string());
@@ -1347,7 +1347,7 @@ mod tests {
             Interval { start: 4, stop: 6, val: String::from("c") },
         ];
         assert_eq!(lapper.intervals.len(), lapper.starts.len());
-        lapper.divide_overlaps_with(|overlap| overlap
+        lapper.divide_overlaps_with(|overlap, _| overlap
             .iter()
             .fold(String::new(), |acc, x| acc + x + ", ")
             .trim_end_matches(", ").to_string());
