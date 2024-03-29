@@ -704,6 +704,28 @@ where
         }
     }
 
+    /// Find all intervals that overlap start .. stop
+    /// ```
+    /// use rust_lapper::{Lapper, Interval};
+    /// let lapper = Lapper::new((0..100).step_by(5)
+    ///                                 .map(|x| Interval{start: x, stop: x+2 , val: true})
+    ///                                 .collect::<Vec<Interval<usize, bool>>>());
+    /// assert_eq!(lapper.find_mut(5, 11).count(), 2);
+    /// ```
+    #[inline]
+    pub fn find_mut(&mut self, start: I, stop: I) -> IterFindMut<I, T> {
+        let off = Self::lower_bound(
+            start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>),
+            &self.intervals,
+        );
+        IterFindMut {
+            inner: self,
+            off,
+            start,
+            stop,
+        }
+    }
+
     /// Find all intevals that overlap start .. stop. This method will work when queries
     /// to this lapper are in sorted (start) order. It uses a linear search from the last query
     /// instead of a binary search. A reference to a cursor must be passed in. This reference will
@@ -769,14 +791,54 @@ where
     // interval.start < stop && interval.stop > start
     fn next(&mut self) -> Option<Self::Item> {
         while self.off < self.inner.intervals.len() {
-            //let mut generator = self.inner.intervals[self.off..].iter();
-            //while let Some(interval) = generator.next() {
             let interval = &self.inner.intervals[self.off];
             self.off += 1;
             if interval.overlap(self.start, self.stop) {
                 return Some(interval);
             } else if interval.start >= self.stop {
                 break;
+            }
+        }
+        None
+    }
+}
+
+/// Mutable Find Iterator
+#[derive(Debug)]
+pub struct IterFindMut<'a, I, T>
+where
+    T: Clone + Send + Sync + 'a,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+{
+    inner: &'a mut Lapper<I, T>,
+    off: usize,
+    start: I,
+    stop: I,
+}
+
+impl<'a, I, T> Iterator for IterFindMut<'a, I, T>
+where
+    T: Clone + Send + Sync + 'a,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+{
+    type Item = (&'a mut T, I, I); // Item, Start, Stop
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.off < self.inner.intervals.len() {
+            // Safety: We are extending the lifetime of the reference to 'a, which
+            // is safe as long as we ensure that IterFindMut never yields the same
+            // element twice, which should not be possible due to `self.off += 1`
+            // https://smallcultfollowing.com/babysteps/blog/2013/10/24/iterators-yielding-mutable-references/
+            unsafe {
+                let ptr = self.inner.intervals.as_mut_ptr().add(self.off);
+                self.off += 1;
+                let interval = &mut *ptr;
+
+                if interval.overlap(self.start, self.stop) {
+                    return Some((&mut interval.val, interval.start, interval.stop));
+                } else if interval.start >= self.stop {
+                    break;
+                }
             }
         }
         None
