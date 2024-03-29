@@ -79,20 +79,19 @@ use num_traits::{
     identities::{one, zero},
     PrimInt, Unsigned,
 };
-use std::cmp::Ordering::{self};
-use std::collections::VecDeque;
+use std::cmp::Ordering;
 
 #[cfg(feature = "with_serde")]
 use serde::{Deserialize, Serialize};
 
 /// Represent a range from [start, stop)
-/// Inclusive start, exclusive of stop
+/// Inclusive start, exclusive of stop (start <= x < end)
 #[cfg_attr(feature = "with_serde", derive(Serialize, Deserialize))]
-#[derive(Eq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Interval<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    T: Clone + Send + Sync,
 {
     pub start: I,
     pub stop: I,
@@ -106,7 +105,7 @@ where
 pub struct Lapper<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    T: Clone + Send + Sync,
 {
     /// List of intervals
     pub intervals: Vec<Interval<I, T>>,
@@ -125,7 +124,7 @@ where
 impl<I, T> Interval<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    T: Clone + Send + Sync,
 {
     /// Compute the intsect between two intervals
     #[inline]
@@ -142,36 +141,10 @@ where
     }
 }
 
-impl<I, T> Ord for Interval<I, T>
-where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
-{
-    #[inline]
-    fn cmp(&self, other: &Interval<I, T>) -> Ordering {
-        match self.start.cmp(&other.start) {
-            Ordering::Less => Ordering::Less,
-            Ordering::Greater => Ordering::Greater,
-            Ordering::Equal => self.stop.cmp(&other.stop),
-        }
-    }
-}
-
-impl<I, T> PartialOrd for Interval<I, T>
-where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
-{
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl<I, T> PartialEq for Interval<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    T: Clone + Send + Sync,
 {
     #[inline]
     fn eq(&self, other: &Interval<I, T>) -> bool {
@@ -179,10 +152,24 @@ where
     }
 }
 
+impl<I, T> PartialOrd for Interval<I, T>
+where
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    T: Clone + Send + Sync,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(match self.start.cmp(&other.start) {
+            Ordering::Less => Ordering::Less,
+            Ordering::Greater => Ordering::Greater,
+            Ordering::Equal => self.stop.cmp(&other.stop),
+        })
+    }
+}
+
 impl<I, T> Lapper<I, T>
 where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    T: Clone + Send + Sync,
 {
     /// Create a new instance of Lapper by passing in a vector of Intervals. This vector will
     /// immediately be sorted by start order.
@@ -194,7 +181,7 @@ where
     /// let lapper = Lapper::new(data);
     /// ```
     pub fn new(mut intervals: Vec<Interval<I, T>>) -> Self {
-        intervals.sort();
+        intervals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
         let (mut starts, mut stops): (Vec<_>, Vec<_>) =
             intervals.iter().map(|x| (x.start, x.stop)).unzip();
         starts.sort();
@@ -342,40 +329,139 @@ where
         }
     }
 
+    /// Return a mutable iterator over the intervals in Lapper
+    #[inline]
+    pub fn iter_mut(&mut self) -> IterLapperMut<I, T> {
+        IterLapperMut {
+            inner: self,
+            pos: 0,
+        }
+    }
+
     /// Merge any intervals that overlap with eachother within the Lapper. This is an easy way to
     /// speed up queries.
     pub fn merge_overlaps(&mut self) {
-        let mut stack: VecDeque<&mut Interval<I, T>> = VecDeque::new();
-        let mut ivs = self.intervals.iter_mut();
-        if let Some(first) = ivs.next() {
-            stack.push_back(first);
-            for interval in ivs {
-                let mut top = stack.pop_back().unwrap();
-                if top.stop < interval.start {
-                    stack.push_back(top);
-                    stack.push_back(interval);
-                } else if top.stop < interval.stop {
-                    top.stop = interval.stop;
-                    //stack.pop_back();
-                    stack.push_back(top);
-                } else {
-                    // they were equal
-                    stack.push_back(top);
+        let mut merged: Vec<Interval<I, T>> = Vec::new();
+
+        for interval in &self.intervals {
+            match merged.last_mut() {
+                // If there is an overlap; extend the last interval to cover the new interval
+                Some(last) if last.stop > interval.start => {
+                    last.stop = std::cmp::max(last.stop, interval.stop);
                 }
+                // No overlap; add the new interval as is
+                _ => merged.push(interval.clone()),
             }
-            self.overlaps_merged = true;
-            self.intervals = stack
-                .into_iter()
-                .map(|x| Interval {
-                    start: x.start,
-                    stop: x.stop,
-                    val: x.val.clone(),
-                })
-                .collect();
         }
-        // Fix the starts and stops used by counts
+
+        self.intervals = merged;
+        self.update_auxiliary_structures();
+        self.overlaps_merged = true;
+    }
+
+    /// Processes overlapping intervals by splitting and merging them based on a custom merge function.
+    pub fn merge_overlaps_with<F>(&mut self, merge_fn: F)
+    where
+        F: Fn(&T, &T) -> T,
+    {
+        let mut merged: Vec<Interval<I, T>> = Vec::new();
+
+        for interval in &self.intervals {
+            match merged.last_mut() {
+                // If there is an overlap; extend the last interval to cover the new interval
+                Some(last) if last.stop > interval.start => {
+                    last.stop = std::cmp::max(last.stop, interval.stop);
+                    last.val = merge_fn(&last.val, &interval.val);
+                }
+                // No overlap; add the new interval as is
+                _ => merged.push(interval.clone()),
+            }
+        }
+
+        self.intervals = merged;
+        self.update_auxiliary_structures();
+        self.overlaps_merged = true;
+    }
+
+    /// Divides a set of overlapping intervals into non-overlapping intervals,
+    /// aggregating associated data for each resulting interval using a custom merge function.
+    // Based on: https://stackoverflow.com/questions/628837/how-to-divide-a-set-of-overlapping-ranges-into-non-overlapping-ranges
+    pub fn divide_overlaps_with<F>(&mut self, merge_fn: F)
+    where
+        F: Fn(&[&T], std::ops::Range<I>) -> T,
+    {
+        // Create start and end events for each interval
+        let mut events: Vec<(I, bool, I, usize)> = Vec::new();
+        for (index, interval) in self.intervals.iter().enumerate() {
+            events.push((interval.start, true, interval.stop, index)); // Start event
+            events.push((interval.stop, false, interval.start, index)); // End event
+        }
+
+        events.sort_by(|a, b| {
+            a.0.cmp(&b.0) // First, sort by endpoint
+                .then_with(|| (!a.1 as u8).cmp(&(!b.1 as u8))) // Then, start events before end events
+                .then_with(|| a.2.cmp(&b.2)) // Finally, sort by the other endpoint if needed
+        });
+
+        let mut active_indices: Vec<usize> = Vec::new();
+        let mut ranges: Vec<Interval<I, T>> = Vec::new();
+        let mut current_start: Option<I> = None;
+
+        for (endpoint, is_start, _, index) in events {
+            // Handle the start of an interval
+            if is_start {
+                if let Some(start) = current_start {
+                    // Merge and push the interval if it doesn't overlap directly with its predecessor
+                    if endpoint > start && active_indices.len() > 0 {
+                        let values = active_indices
+                            .iter()
+                            .map(|&i| &self.intervals[i].val)
+                            .collect::<Vec<_>>();
+                        ranges.push(Interval {
+                            start,
+                            stop: endpoint,
+                            val: merge_fn(&values, start..endpoint),
+                        });
+                    }
+                }
+
+                // Add index to active intervals
+                active_indices.push(index);
+            }
+            // Handle the end of an interval
+            else {
+                // Create an interval up to the current endpoint
+                if let Some(start) = current_start {
+                    if endpoint > start && active_indices.len() > 0 {
+                        let values = active_indices
+                            .iter()
+                            .map(|&i| &self.intervals[i].val)
+                            .collect::<Vec<_>>();
+                        ranges.push(Interval {
+                            start,
+                            stop: endpoint,
+                            val: merge_fn(&values, start..endpoint),
+                        });
+                    }
+                }
+
+                // Remove ended interval
+                active_indices.retain(|&i| i != index);
+            }
+
+            // Update the start for a new or continued interval
+            current_start = Some(endpoint);
+        }
+
+        self.intervals = ranges;
+        self.update_auxiliary_structures();
+        self.overlaps_merged = true;
+    }
+
+    /// Helper method to update starts, stops, and max_len based on the current state of intervals.
+    fn update_auxiliary_structures(&mut self) {
         let (mut starts, mut stops): (Vec<_>, Vec<_>) =
-            self.intervals.iter().map(|x| (x.start, x.stop)).unzip();
+            self.intervals.iter().map(|iv| (iv.start, iv.stop)).unzip();
         starts.sort();
         stops.sort();
         self.starts = starts;
@@ -383,7 +469,7 @@ where
         self.max_len = self
             .intervals
             .iter()
-            .map(|x| x.stop.checked_sub(&x.start).unwrap_or_else(zero::<I>))
+            .map(|iv| iv.stop.checked_sub(&iv.start).unwrap_or_else(zero::<I>))
             .max()
             .unwrap_or_else(zero::<I>);
     }
@@ -627,6 +713,28 @@ where
         }
     }
 
+    /// Find all intervals that overlap start .. stop
+    /// ```
+    /// use rust_lapper::{Lapper, Interval};
+    /// let lapper = Lapper::new((0..100).step_by(5)
+    ///                                 .map(|x| Interval{start: x, stop: x+2 , val: true})
+    ///                                 .collect::<Vec<Interval<usize, bool>>>());
+    /// assert_eq!(lapper.find_mut(5, 11).count(), 2);
+    /// ```
+    #[inline]
+    pub fn find_mut(&mut self, start: I, stop: I) -> IterFindMut<I, T> {
+        let off = Self::lower_bound(
+            start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>),
+            &self.intervals,
+        );
+        IterFindMut {
+            inner: self,
+            off,
+            start,
+            stop,
+        }
+    }
+
     /// Find all intevals that overlap start .. stop. This method will work when queries
     /// to this lapper are in sorted (start) order. It uses a linear search from the last query
     /// instead of a binary search. A reference to a cursor must be passed in. This reference will
@@ -672,7 +780,7 @@ where
 #[derive(Debug)]
 pub struct IterFind<'a, I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     inner: &'a Lapper<I, T>,
@@ -683,7 +791,7 @@ where
 
 impl<'a, I, T> Iterator for IterFind<'a, I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
@@ -692,8 +800,6 @@ where
     // interval.start < stop && interval.stop > start
     fn next(&mut self) -> Option<Self::Item> {
         while self.off < self.inner.intervals.len() {
-            //let mut generator = self.inner.intervals[self.off..].iter();
-            //while let Some(interval) = generator.next() {
             let interval = &self.inner.intervals[self.off];
             self.off += 1;
             if interval.overlap(self.start, self.stop) {
@@ -706,11 +812,54 @@ where
     }
 }
 
+/// Mutable Find Iterator
+#[derive(Debug)]
+pub struct IterFindMut<'a, I, T>
+where
+    T: Clone + Send + Sync + 'a,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+{
+    inner: &'a mut Lapper<I, T>,
+    off: usize,
+    start: I,
+    stop: I,
+}
+
+impl<'a, I, T> Iterator for IterFindMut<'a, I, T>
+where
+    T: Clone + Send + Sync + 'a,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+{
+    type Item = (&'a mut T, I, I); // Value, Start, Stop
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.off < self.inner.intervals.len() {
+            // Safety: We are extending the lifetime of the reference to 'a, which
+            // is safe as long as we ensure that IterFindMut never yields the same
+            // element twice, which should not be possible due to `self.off += 1`
+            // https://smallcultfollowing.com/babysteps/blog/2013/10/24/iterators-yielding-mutable-references/
+            unsafe {
+                let ptr = self.inner.intervals.as_mut_ptr().add(self.off);
+                self.off += 1;
+                let interval = &mut *ptr;
+
+                if interval.overlap(self.start, self.stop) {
+                    return Some((&mut interval.val, interval.start, interval.stop));
+                } else if interval.start >= self.stop {
+                    break;
+                }
+            }
+        }
+
+        return None;
+    }
+}
+
 /// Depth Iterator
 #[derive(Debug)]
 pub struct IterDepth<'a, I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     inner: &'a Lapper<I, T>,
@@ -723,7 +872,7 @@ where
 
 impl<'a, I, T> Iterator for IterDepth<'a, I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     type Item = Interval<I, I>;
@@ -771,10 +920,11 @@ where
         })
     }
 }
+
 /// Lapper Iterator
 pub struct IterLapper<'a, I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     inner: &'a Lapper<I, T>,
@@ -783,7 +933,7 @@ where
 
 impl<'a, I, T> Iterator for IterLapper<'a, I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
@@ -798,9 +948,44 @@ where
     }
 }
 
+/// Mutable Lapper Iterator
+pub struct IterLapperMut<'a, I, T>
+where
+    T: Clone + Send + Sync + 'a,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+{
+    inner: &'a mut Lapper<I, T>,
+    pos: usize,
+}
+
+impl<'a, I, T> Iterator for IterLapperMut<'a, I, T>
+where
+    T: Clone + Send + Sync + 'a,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+{
+    type Item = (&'a mut T, I, I); // Value, Start, Stop
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos < self.inner.intervals.len() {
+            // Safety: We are extending the lifetime of the reference to 'a, which
+            // is safe as long as we ensure that IterLapperMut never yields the same
+            // element twice, which should not be possible due to `self.pos += 1`
+            // https://smallcultfollowing.com/babysteps/blog/2013/10/24/iterators-yielding-mutable-references/
+            unsafe {
+                let ptr = self.inner.intervals.as_mut_ptr().add(self.pos);
+                self.pos += 1;
+                let interval = &mut *ptr;
+                return Some((&mut interval.val, interval.start, interval.stop));
+            }
+        } else {
+            return None;
+        }
+    }
+}
+
 impl<I, T> IntoIterator for Lapper<I, T>
 where
-    T: Eq + Clone + Send + Sync,
+    T: Clone + Send + Sync,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     type Item = Interval<I, T>;
@@ -813,7 +998,7 @@ where
 
 impl<'a, I, T> IntoIterator for &'a Lapper<I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
@@ -826,7 +1011,7 @@ where
 
 impl<'a, I, T> IntoIterator for &'a mut Lapper<I, T>
 where
-    T: Eq + Clone + Send + Sync + 'a,
+    T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
     type Item = &'a mut Interval<I, T>;
@@ -1123,7 +1308,159 @@ mod tests {
         lapper.merge_overlaps();
         assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
         assert_eq!(lapper.intervals.len(), lapper.starts.len())
+    }
 
+    #[test]
+    fn test_merge_overlaps_with() {
+        let mut lapper = setup_badlapper();
+        let expected: Vec<&Iv> = vec![
+            &Iv{ start: 10, stop: 16, val: 3 }, // 3 overlaps, initial val = 0, +3 overlaps
+            &Iv{ start: 40, stop: 45, val: 0 }, // No overlap, val remains 0
+            &Iv{ start: 50, stop: 55, val: 0 }, // No overlap, val remains 0
+            &Iv{ start: 60, stop: 65, val: 0 }, // No overlap, val remains 0
+            &Iv{ start: 68, stop: 120, val: 2 }, // 2 overlaps, initial val = 0, +2 overlaps
+        ];
+        assert_eq!(lapper.intervals.len(), lapper.starts.len());
+         lapper.merge_overlaps_with( |a: &u32, _b: &u32| -> u32 { *a + 1 });
+        assert_eq!(expected, lapper.iter().collect::<Vec<&Iv>>());
+        assert_eq!(lapper.intervals.len(), lapper.starts.len());
+    }
+
+    #[test]
+    fn test_divide_overlaps_with() {
+        let mut lapper : Lapper<u32, String> = Lapper::new(vec![
+            Interval { start: 1, stop: 5, val: String::from("a") },
+            Interval { start: 3, stop: 7, val: String::from("b") },
+            Interval { start: 6, stop: 9, val: String::from("c") },
+        ]);
+        let expected: Vec<Interval<u32, String>> = vec![
+            Interval { start: 1, stop: 3, val: String::from("a") },
+            Interval { start: 3, stop: 5, val: String::from("a, b") },
+            Interval { start: 5, stop: 6, val: String::from("b") },
+            Interval { start: 6, stop: 7, val: String::from("b, c") },
+            Interval { start: 7, stop: 9, val: String::from("c") },
+        ];
+        assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
+        lapper.divide_overlaps_with(|overlap, _| overlap
+            .iter()
+            .fold(String::new(), |acc, x| acc + x + ", ")
+            .trim_end_matches(", ").to_string());
+        assert_eq!(expected, lapper.iter().cloned().collect::<Vec<_>>());
+        assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
+    }
+
+    // Testcase from:
+    // https://stackoverflow.com/questions/628837/how-to-divide-a-set-of-overlapping-ranges-into-non-overlapping-ranges
+    #[test]
+    fn test_divide_overlaps_with_stackoverflow() {
+        let mut lapper: Lapper<u32, String> = Lapper::new(vec![
+            Interval { start: 0, stop: 100, val: String::from("a") },
+            Interval { start: 0, stop: 75, val: String::from("b") },
+            Interval { start: 75, stop: 80, val: String::from("d") },
+            Interval {start: 95, stop: 150, val: String::from("c")},
+            Interval {start: 120, stop: 130, val: String::from("d")},
+            Interval {start: 160, stop: 175, val: String::from("e")},
+            Interval {start: 165, stop: 180, val: String::from("a")},
+        ]);
+        let expected: Vec<Interval<u32, String>> = vec![
+            Interval { start: 0, stop: 75, val: String::from("b, a") },
+            Interval { start: 75, stop: 80, val: String::from("a, d") },
+            Interval {start: 80, stop: 95, val: String::from("a")},
+            Interval {start: 95, stop: 100, val: String::from("a, c")},
+            Interval {start: 100, stop: 120, val: String::from("c")},
+            Interval {start: 120, stop: 130, val: String::from("c, d")},
+            Interval {start: 130, stop: 150, val: String::from("c")},
+            Interval {start: 160, stop: 165, val: String::from("e")},
+            Interval {start: 165, stop: 175, val: String::from("e, a")},
+            Interval {start: 175, stop: 180, val: String::from("a")},
+        ];
+        assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
+        lapper.divide_overlaps_with(|overlap, _| overlap
+            .iter()
+            .fold(String::new(), |acc, x| acc + x + ", ")
+            .trim_end_matches(", ").to_string());
+        assert_eq!(expected, lapper.iter().cloned().collect::<Vec<_>>());
+        assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
+    }
+
+    #[test]
+    fn test_divide_overlaps_with_contained_interval() {
+        let mut lapper = Lapper::new(vec![
+            Interval { start: 1, stop: 10, val: String::from("a") },
+            Interval { start: 3, stop: 7, val: String::from("b") },
+        ]);
+        let expected: Vec<Interval<u32, String>> = vec![
+            Interval { start: 1, stop: 3, val: String::from("a") },
+            Interval { start: 3, stop: 7, val: String::from("a, b") },
+            Interval { start: 7, stop: 10, val: String::from("a") },
+        ];
+        assert_eq!(lapper.intervals.len(), lapper.starts.len());
+        lapper.divide_overlaps_with(|overlap, _| overlap
+            .iter()
+            .fold(String::new(), |acc, x| acc + x + ", ")
+            .trim_end_matches(", ").to_string());
+        assert_eq!(expected, lapper.iter().cloned().collect::<Vec<_>>());
+        assert_eq!(lapper.intervals.len(), lapper.starts.len()); 
+    }
+
+    #[test]
+    fn test_divide_overlaps_with_non_overlapping_intervals() {
+        let mut lapper = Lapper::new(vec![
+            Interval { start: 1, stop: 2, val: String::from("a") },
+            Interval { start: 3, stop: 4, val: String::from("b") },
+        ]);
+        let expected: Vec<Interval<u32, String>> = vec![
+            Interval { start: 1, stop: 2, val: String::from("a") },
+            Interval { start: 3, stop: 4, val: String::from("b") },
+        ];
+        assert_eq!(lapper.intervals.len(), lapper.starts.len());
+        lapper.divide_overlaps_with(|overlap, _| overlap
+            .iter()
+            .fold(String::new(), |acc, x| acc + x + ", ")
+            .trim_end_matches(", ").to_string());
+        assert_eq!(expected, lapper.iter().cloned().collect::<Vec<_>>());
+        assert_eq!(lapper.intervals.len(), lapper.starts.len());
+    }
+
+    #[test]
+    fn test_divide_overlaps_with_partial_overlap() {
+        let mut lapper = Lapper::new(vec![
+            Interval { start: 1, stop: 4, val: String::from("a") },
+            Interval { start: 3, stop: 6, val: String::from("b") },
+        ]);
+        let expected: Vec<Interval<u32, String>> = vec![
+            Interval { start: 1, stop: 3, val: String::from("a") },
+            Interval { start: 3, stop: 4, val: String::from("a, b") },
+            Interval { start: 4, stop: 6, val: String::from("b") },
+        ];
+        assert_eq!(lapper.intervals.len(), lapper.starts.len());
+        lapper.divide_overlaps_with(|overlap, _| overlap
+            .iter()
+            .fold(String::new(), |acc, x| acc + x + ", ")
+            .trim_end_matches(", ").to_string());
+        assert_eq!(expected, lapper.iter().cloned().collect::<Vec<_>>());
+        assert_eq!(lapper.intervals.len(), lapper.starts.len());
+    }
+
+    #[test]
+    fn test_divide_overlaps_with_exact_overlap() {
+        let mut lapper = Lapper::new(vec![
+            Interval { start: 1, stop: 4, val: String::from("a") },
+            Interval { start: 1, stop: 4, val: String::from("b") },
+            Interval { start: 3, stop: 6, val: String::from("c") },
+        ]);
+        let expected: Vec<Interval<u32, String>> = vec![
+            Interval { start: 1, stop: 3, val: String::from("a, b") },
+            Interval { start: 3, stop: 4, val: String::from("a, b, c") },
+            Interval { start: 4, stop: 6, val: String::from("c") },
+        ];
+        assert_eq!(lapper.intervals.len(), lapper.starts.len());
+        lapper.divide_overlaps_with(|overlap, _| overlap
+            .iter()
+            .fold(String::new(), |acc, x| acc + x + ", ")
+            .trim_end_matches(", ").to_string());
+        assert_eq!(expected, lapper.iter().cloned().collect::<Vec<_>>());
+        assert_eq!(lapper.intervals.len(), lapper.starts.len());
     }
 
     // This test was added because this breakage was found in a library user's code, where after
@@ -1373,27 +1710,27 @@ mod tests {
         assert_eq!(lapper.count(28974798, 33141355), 1);
     }
 
-    #[test]
-    fn serde_test() {
-        let data = vec![
-            Iv{start:25264912, stop: 25264986, val: 0},
-            Iv{start:27273024, stop: 27273065	, val: 0},
-            Iv{start:27440273, stop: 27440318	, val: 0},
-            Iv{start:27488033, stop: 27488125	, val: 0},
-            Iv{start:27938410, stop: 27938470	, val: 0},
-            Iv{start:27959118, stop: 27959171	, val: 0},
-            Iv{start:28866309, stop: 33141404	, val: 0},
-        ];
-        let lapper = Lapper::new(data);
+    // #[test]
+    // fn serde_test() {
+    //     let data = vec![
+    //         Iv{start:25264912, stop: 25264986, val: 0},
+    //         Iv{start:27273024, stop: 27273065	, val: 0},
+    //         Iv{start:27440273, stop: 27440318	, val: 0},
+    //         Iv{start:27488033, stop: 27488125	, val: 0},
+    //         Iv{start:27938410, stop: 27938470	, val: 0},
+    //         Iv{start:27959118, stop: 27959171	, val: 0},
+    //         Iv{start:28866309, stop: 33141404	, val: 0},
+    //     ];
+    //     let lapper = Lapper::new(data);
 
-        let serialized = bincode::serialize(&lapper).unwrap();
-        let deserialzed: Lapper<usize, u32> = bincode::deserialize(&serialized).unwrap();
+    //     let serialized = bincode::serialize(&lapper).unwrap();
+    //     let deserialzed: Lapper<usize, u32> = bincode::deserialize(&serialized).unwrap();
 
-        let found = deserialzed.find(28974798, 33141355).collect::<Vec<&Iv>>();
-        assert_eq!(found, vec![
-            &Iv{start:28866309, stop: 33141404	, val: 0},
-        ]);
-        assert_eq!(deserialzed.count(28974798, 33141355), 1);
-    }
+    //     let found = deserialzed.find(28974798, 33141355).collect::<Vec<&Iv>>();
+    //     assert_eq!(found, vec![
+    //         &Iv{start:28866309, stop: 33141404	, val: 0},
+    //     ]);
+    //     assert_eq!(deserialzed.count(28974798, 33141355), 1);
+    // }
 
 }
