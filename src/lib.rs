@@ -329,6 +329,15 @@ where
         }
     }
 
+    /// Return a mutable iterator over the intervals in Lapper
+    #[inline]
+    pub fn iter_mut(&mut self) -> IterLapperMut<I, T> {
+        IterLapperMut {
+            inner: self,
+            pos: 0,
+        }
+    }
+
     /// Merge any intervals that overlap with eachother within the Lapper. This is an easy way to
     /// speed up queries.
     pub fn merge_overlaps(&mut self) {
@@ -821,7 +830,7 @@ where
     T: Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
 {
-    type Item = (&'a mut T, I, I); // Item, Start, Stop
+    type Item = (&'a mut T, I, I); // Value, Start, Stop
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.off < self.inner.intervals.len() {
@@ -841,7 +850,8 @@ where
                 }
             }
         }
-        None
+
+        return None;
     }
 }
 
@@ -910,6 +920,7 @@ where
         })
     }
 }
+
 /// Lapper Iterator
 pub struct IterLapper<'a, I, T>
 where
@@ -933,6 +944,41 @@ where
         } else {
             self.pos += 1;
             self.inner.intervals.get(self.pos - 1)
+        }
+    }
+}
+
+/// Mutable Lapper Iterator
+pub struct IterLapperMut<'a, I, T>
+where
+    T: Clone + Send + Sync + 'a,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+{
+    inner: &'a mut Lapper<I, T>,
+    pos: usize,
+}
+
+impl<'a, I, T> Iterator for IterLapperMut<'a, I, T>
+where
+    T: Clone + Send + Sync + 'a,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+{
+    type Item = (&'a mut T, I, I); // Value, Start, Stop
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos < self.inner.intervals.len() {
+            // Safety: We are extending the lifetime of the reference to 'a, which
+            // is safe as long as we ensure that IterLapperMut never yields the same
+            // element twice, which should not be possible due to `self.pos += 1`
+            // https://smallcultfollowing.com/babysteps/blog/2013/10/24/iterators-yielding-mutable-references/
+            unsafe {
+                let ptr = self.inner.intervals.as_mut_ptr().add(self.pos);
+                self.pos += 1;
+                let interval = &mut *ptr;
+                return Some((&mut interval.val, interval.start, interval.stop));
+            }
+        } else {
+            return None;
         }
     }
 }
