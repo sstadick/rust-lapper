@@ -256,7 +256,7 @@ where
         self.overlaps_merged = false;
     }
 
-    /// Get the number over intervals in Lapper
+    /// Get the number of intervals in Lapper.
     /// ```
     /// use rust_lapper::{Lapper, Interval};
     /// let data = (0..20).step_by(5)
@@ -270,7 +270,7 @@ where
         self.intervals.len()
     }
 
-    /// Check if lapper is empty
+    /// Check if lapper is empty.
     /// ```
     /// use rust_lapper::{Lapper, Interval};
     /// let data: Vec<Interval<usize, bool>> = vec![];
@@ -299,7 +299,7 @@ where
         }
     }
 
-    /// Get the number fo positions covered by the intervals in Lapper and store it. If you are
+    /// Get the number of positions covered by the intervals in Lapper and store it. If you are
     /// going to be using the coverage, you should set it to avoid calculating it over and over.
     pub fn set_cov(&mut self) -> I {
         let cov = self.calculate_coverage();
@@ -333,7 +333,7 @@ where
         cov
     }
 
-    /// Return an iterator over the intervals in Lapper
+    /// Return an iterator over the intervals in Lapper.
     #[inline]
     pub fn iter(&self) -> IterLapper<I, T> {
         IterLapper {
@@ -342,7 +342,7 @@ where
         }
     }
 
-    /// Merge any intervals that overlap with eachother within the Lapper. This is an easy way to
+    /// Merge any intervals that overlap with each other within the Lapper. This is an easy way to
     /// speed up queries.
     pub fn merge_overlaps(&mut self) {
         let mut stack: VecDeque<&mut Interval<I, T>> = VecDeque::new();
@@ -391,7 +391,7 @@ where
     /// Determine the first index that we should start checking for overlaps for via a binary
     /// search.
     /// Assumes that the maximum interval length in `intervals` has been subtracted from
-    /// `start`, otherwise the result is undefined
+    /// `start`, otherwise the result is undefined.
     #[inline]
     pub fn lower_bound(start: I, intervals: &[Interval<I, T>]) -> usize {
         let mut size = intervals.len();
@@ -523,7 +523,7 @@ where
 
     /// Find the intersect of two lapper objects.
     /// Intersect: The number of positions where both lappers intersect. Note that a position only
-    /// counts one time, multiple Intervals covering the same position don't add up
+    /// counts one time, multiple Intervals covering the same position don't add up.
     #[inline]
     pub fn intersect(&self, other: &Self) -> I {
         self.union_and_intersect(other).1
@@ -606,7 +606,7 @@ where
         //println!("stop found in starts: {}", last);
     }
 
-    /// Find all intervals that overlap start .. stop
+    /// Find all intervals that overlap start .. stop.
     /// ```
     /// use rust_lapper::{Lapper, Interval};
     /// let lapper = Lapper::new((0..100).step_by(5)
