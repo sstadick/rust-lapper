@@ -3,10 +3,10 @@
 //! - Extremely fast on most genomic datasets. (3-4x faster than other methods)
 //! - Extremely fast on in order queries. (10x faster than other methods)
 //! - Extremely fast intersections count method based on the
-//! [BITS](https://arxiv.org/pdf/1208.3407.pdf) algorithm
+//!   [BITS](https://arxiv.org/pdf/1208.3407.pdf) algorithm
 //! - Parallel friendly. Queries are on an immutable structure, even for seek
 //! - Consumer / Adapter paradigm, Iterators are returned and serve as the main API for interacting
-//! with the lapper
+//!   with the lapper
 //!
 //! ## Details:
 //!
@@ -350,7 +350,7 @@ where
         if let Some(first) = ivs.next() {
             stack.push_back(first);
             for interval in ivs {
-                let mut top = stack.pop_back().unwrap();
+                let top = stack.pop_back().unwrap();
                 if top.stop < interval.start {
                     stack.push_back(top);
                     stack.push_back(interval);
@@ -422,24 +422,20 @@ where
     where
         K: PartialEq + PartialOrd,
     {
-        if elems.is_empty() {
+        if elems.is_empty() || elems[0] >= *key {
             return 0;
+        } else if elems[elems.len() - 1] < *key {
+            return elems.len();
         }
-        if elems[0] > *key {
-            return 0;
-        }
-        let mut high = elems.len();
-        let mut low = 0;
 
-        while high - low > 1 {
-            let mid = (high + low) / 2;
-            if elems[mid] < *key {
-                low = mid;
-            } else {
-                high = mid;
-            }
+        let mut cursor = 0;
+        let mut length = elems.len();
+        while length > 1 {
+            let half = length >> 1;
+            length -= half;
+            cursor += (usize::from(elems[cursor + half - 1] < *key)) * half;
         }
-        high
+        cursor
     }
 
     /// Find the union and the intersect of two lapper objects.
@@ -587,23 +583,11 @@ where
     #[inline]
     pub fn count(&self, start: I, stop: I) -> usize {
         let len = self.intervals.len();
-        let mut first = Self::bsearch_seq(start, &self.stops);
+        // Plus one to account for half-openness of lapper intervals compared to BITS paper
+        let first = Self::bsearch_seq(start + one::<I>(), &self.stops);
         let last = Self::bsearch_seq(stop, &self.starts);
-        //println!("{}/{}", start, stop);
-        //println!("pre start found in stops: {}: {}", first, self.stops[first]);
-        //println!("pre stop found in starts: {}", last);
-        //while last < len && self.starts[last] == stop {
-        //last += 1;
-        //}
-        while first < len && self.stops[first] == start {
-            first += 1;
-        }
         let num_cant_after = len - last;
         len - first - num_cant_after
-        //println!("{:#?}", self.starts);
-        //println!("{:#?}", self.stops);
-        //println!("start found in stops: {}", first);
-        //println!("stop found in starts: {}", last);
     }
 
     /// Find all intervals that overlap start .. stop
