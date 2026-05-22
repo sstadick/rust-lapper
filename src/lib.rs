@@ -194,11 +194,27 @@ where
     /// let lapper = Lapper::new(data);
     /// ```
     pub fn new(mut intervals: Vec<Interval<I, T>>) -> Self {
+        #[cfg(feature = "sort_unstable")]
+        intervals.sort_unstable();
+
+        #[cfg(not(feature = "sort_unstable"))]
         intervals.sort();
+
         let (mut starts, mut stops): (Vec<_>, Vec<_>) =
             intervals.iter().map(|x| (x.start, x.stop)).unzip();
-        starts.sort();
-        stops.sort();
+
+        #[cfg(feature = "sort_unstable")]
+        {
+            starts.sort_unstable();
+            stops.sort_unstable();
+        }
+
+        #[cfg(not(feature = "sort_unstable"))]
+        {
+            starts.sort();
+            stops.sort();
+        }
+
         let mut max_len = zero::<I>();
         for interval in intervals.iter() {
             let i_len = interval
@@ -376,8 +392,19 @@ where
         // Fix the starts and stops used by counts
         let (mut starts, mut stops): (Vec<_>, Vec<_>) =
             self.intervals.iter().map(|x| (x.start, x.stop)).unzip();
-        starts.sort();
-        stops.sort();
+
+        #[cfg(feature = "sort_unstable")]
+        {
+            starts.sort_unstable();
+            stops.sort_unstable();
+        }
+
+        #[cfg(not(feature = "sort_unstable"))]
+        {
+            starts.sort();
+            stops.sort();
+        }
+
         self.starts = starts;
         self.stops = stops;
         self.max_len = self

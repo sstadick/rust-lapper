@@ -21,6 +21,7 @@ name = "ex1"
 [features]
 default = []
 with_serde = ["serde/derive"]
+sort_unstable = []
 
 [dependencies]
 num-traits = "0.2.12"
