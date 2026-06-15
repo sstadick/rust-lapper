@@ -1384,6 +1384,7 @@ mod tests {
         assert_eq!(lapper.count(28974798, 33141355), 1);
     }
 
+    #[cfg(feature = "with_serde")]
     #[test]
     fn serde_test() {
         let data = vec![
