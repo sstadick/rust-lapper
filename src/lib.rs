@@ -351,7 +351,7 @@ where
 
     /// Return an iterator over the intervals in Lapper
     #[inline]
-    pub fn iter(&self) -> IterLapper<I, T> {
+    pub fn iter(&self) -> IterLapper<'_, I, T> {
         IterLapper {
             inner: self,
             pos: 0,
@@ -574,7 +574,7 @@ where
     ///             Interval { start: 20, stop: 25, val: 1 }]);
     /// ```
     #[inline]
-    pub fn depth(&self) -> IterDepth<I, T> {
+    pub fn depth(&self) -> IterDepth<'_, I, T> {
         let mut merged_lapper = Lapper::new(
             self.intervals
                 .iter()
@@ -626,7 +626,7 @@ where
     /// assert_eq!(lapper.find(5, 11).count(), 2);
     /// ```
     #[inline]
-    pub fn find(&self, start: I, stop: I) -> IterFind<I, T> {
+    pub fn find(&self, start: I, stop: I) -> IterFind<'_, I, T> {
         IterFind {
             inner: self,
             off: Self::lower_bound(
