@@ -194,11 +194,27 @@ where
     /// let lapper = Lapper::new(data);
     /// ```
     pub fn new(mut intervals: Vec<Interval<I, T>>) -> Self {
+        #[cfg(feature = "sort_unstable")]
+        intervals.sort_unstable();
+
+        #[cfg(not(feature = "sort_unstable"))]
         intervals.sort();
+
         let (mut starts, mut stops): (Vec<_>, Vec<_>) =
             intervals.iter().map(|x| (x.start, x.stop)).unzip();
-        starts.sort();
-        stops.sort();
+
+        #[cfg(feature = "sort_unstable")]
+        {
+            starts.sort_unstable();
+            stops.sort_unstable();
+        }
+
+        #[cfg(not(feature = "sort_unstable"))]
+        {
+            starts.sort();
+            stops.sort();
+        }
+
         let mut max_len = zero::<I>();
         for interval in intervals.iter() {
             let i_len = interval
@@ -335,7 +351,7 @@ where
 
     /// Return an iterator over the intervals in Lapper
     #[inline]
-    pub fn iter(&self) -> IterLapper<I, T> {
+    pub fn iter(&self) -> IterLapper<'_, I, T> {
         IterLapper {
             inner: self,
             pos: 0,
@@ -376,8 +392,19 @@ where
         // Fix the starts and stops used by counts
         let (mut starts, mut stops): (Vec<_>, Vec<_>) =
             self.intervals.iter().map(|x| (x.start, x.stop)).unzip();
-        starts.sort();
-        stops.sort();
+
+        #[cfg(feature = "sort_unstable")]
+        {
+            starts.sort_unstable();
+            stops.sort_unstable();
+        }
+
+        #[cfg(not(feature = "sort_unstable"))]
+        {
+            starts.sort();
+            stops.sort();
+        }
+
         self.starts = starts;
         self.stops = stops;
         self.max_len = self
@@ -547,7 +574,7 @@ where
     ///             Interval { start: 20, stop: 25, val: 1 }]);
     /// ```
     #[inline]
-    pub fn depth(&self) -> IterDepth<I, T> {
+    pub fn depth(&self) -> IterDepth<'_, I, T> {
         let mut merged_lapper = Lapper::new(
             self.intervals
                 .iter()
@@ -599,7 +626,7 @@ where
     /// assert_eq!(lapper.find(5, 11).count(), 2);
     /// ```
     #[inline]
-    pub fn find(&self, start: I, stop: I) -> IterFind<I, T> {
+    pub fn find(&self, start: I, stop: I) -> IterFind<'_, I, T> {
         IterFind {
             inner: self,
             off: Self::lower_bound(
@@ -1357,6 +1384,7 @@ mod tests {
         assert_eq!(lapper.count(28974798, 33141355), 1);
     }
 
+    #[cfg(feature = "with_serde")]
     #[test]
     fn serde_test() {
         let data = vec![

@@ -229,6 +229,7 @@ fn main() {
 
 ## Release Notes
 
+- `1.3.0`: Add the `sort_unstable` feature flag for allocation-sensitive sorting thanks to @jameslkingsley.
 - `1.1.0`: Added insert functionality thanks to @zaporter
 - `0.4.0`: Addition of the BITS count algorithm.
 - `0.4.2`: Bugfix in to update starts/stops vectors when overlaps merged

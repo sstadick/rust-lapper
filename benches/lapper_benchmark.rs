@@ -3,14 +3,12 @@ extern crate criterion;
 extern crate rand;
 extern crate rust_lapper;
 
-use cpu_time::ProcessTime;
 use criterion::black_box;
-use criterion::Criterion;
-use rand::prelude::*;
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
+use rand::rngs::StdRng;
 use rand::Rng;
+use rand::SeedableRng;
 use rust_lapper::{Interval, Lapper};
-use std::ops::Range;
-use std::time::Duration;
 
 type Iv = Interval<u32, bool>;
 
@@ -21,7 +19,7 @@ fn randomi(imin: u32, imax: u32) -> u32 {
 
 fn make_random(n: usize, range_max: u32, size_min: u32, size_max: u32) -> Vec<Iv> {
     let mut result = Vec::with_capacity(n);
-    for i in 0..n {
+    for _ in 0..n {
         let s = randomi(0, range_max);
         let e = s + randomi(size_min, size_max);
         result.push(Interval {
@@ -42,6 +40,41 @@ fn make_interval_set() -> (Vec<Iv>, Vec<Iv>) {
     let intervals = make_random(n, chrom_size, min_interval_size, max_interval_size);
     let other_intervals = make_random(n, 10 * chrom_size, 1, 2);
     (intervals, other_intervals)
+}
+
+fn make_random_seeded(
+    n: usize,
+    range_max: u32,
+    size_min: u32,
+    size_max: u32,
+    seed: u64,
+) -> Vec<Iv> {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut result = Vec::with_capacity(n);
+    for _ in 0..n {
+        let s = rng.gen_range(0, range_max);
+        let e = s + rng.gen_range(size_min, size_max);
+        result.push(Interval {
+            start: s,
+            stop: e,
+            val: false,
+        });
+    }
+    result
+}
+
+fn make_non_overlapping(n: usize) -> Vec<Iv> {
+    (0..n)
+        .rev()
+        .map(|i| {
+            let start = (i as u32) * 10;
+            Interval {
+                start,
+                stop: start + 5,
+                val: false,
+            }
+        })
+        .collect()
 }
 
 pub fn query(c: &mut Criterion) {
@@ -145,5 +178,53 @@ pub fn query(c: &mut Criterion) {
     comparison_group.finish();
 }
 
-criterion_group!(benches, query);
+pub fn construction(c: &mut Criterion) {
+    let sizes = [1_000usize, 10_000, 100_000];
+    let chrom_size = 100_000_000;
+    let min_interval_size = 500;
+    let max_interval_size = 80000;
+
+    let mut construction_group = c.benchmark_group("Construction");
+    for &n in sizes.iter() {
+        construction_group.throughput(Throughput::Elements(n as u64));
+        let intervals = make_random_seeded(
+            n,
+            chrom_size,
+            min_interval_size,
+            max_interval_size,
+            n as u64,
+        );
+        let non_overlapping_intervals = make_non_overlapping(n);
+
+        construction_group.bench_with_input(
+            BenchmarkId::new("Lapper::new from unsorted intervals", n),
+            &intervals,
+            |b, intervals| {
+                b.iter_batched(
+                    || intervals.clone(),
+                    |intervals| black_box(Lapper::new(black_box(intervals))),
+                    BatchSize::LargeInput,
+                );
+            },
+        );
+
+        construction_group.bench_with_input(
+            BenchmarkId::new("merge_overlaps non-overlapping intervals", n),
+            &non_overlapping_intervals,
+            |b, intervals| {
+                b.iter_batched(
+                    || Lapper::new(intervals.clone()),
+                    |mut lapper| {
+                        lapper.merge_overlaps();
+                        black_box(lapper)
+                    },
+                    BatchSize::LargeInput,
+                );
+            },
+        );
+    }
+    construction_group.finish();
+}
+
+criterion_group!(benches, query, construction);
 criterion_main!(benches);
