@@ -1,25 +1,29 @@
-# Always-on 32-interval block contender
+# Always-on SIMD block-mask contender
 
-This branch is an exact archive of the live `feat/index` working-tree source at
-the start of the SIMD experiments. The source hash was:
+This branch archives the first exact SIMD-mask finalist. It keeps the
+32-interval block index and adds start-order end storage, minimum ends per
+block, and `Lapper<u32, T>::find_block_mask`.
 
-```text
-ece99b9751f9aecbcdd6758415690072901ca4934d16dacfd703fcf7b7eef0ee  src/lib.rs
-```
+Every candidate block takes one exact route:
 
-It stores maximum ends, next-greater links, and monotonic prefix maxima for
-fixed 32-interval blocks. The prefix maxima choose the first candidate block;
-the block links skip later all-miss blocks. Both optimizations are always on,
-and `find` still yields references in ascending start order.
+1. `max_end <= query.start`: jump over the all-miss block.
+2. `min_end > query.start`: all active lanes pass the end test, so return the
+   sorted-start prefix directly.
+3. Otherwise: calculate one NEON overlap mask, save it in the iterator, and
+   consume its low set bits in forward order across `next()` calls.
 
-Recorded nine-repeat medians from the same direct harness used for the SIMD
-comparison:
+There is no score, sampling heuristic, data classifier, or query mode switch.
+The scalar fallback is correct but was not performance-tested. The measured
+SIMD path is specialized to `u32` on AArch64.
+
+Recorded nine-repeat medians from one direct comparison session:
 
 | Case | Build | Query | Total |
 |---|---:|---:|---:|
-| `1-2` | 3.263 ms | 5.875 ms | 9.124 ms |
-| `7-3` | 26.742 ms | 87.010 ms | 113.716 ms |
-| `8-7` | 36.949 ms | 608.013 ms | 644.990 ms |
+| `1-2` | 3.231 ms | 4.100 ms | 7.295 ms |
+| `7-3` | 26.764 ms | 55.286 ms | 82.012 ms |
+| `8-7` | 36.926 ms | 603.311 ms | 640.183 ms |
 
-The archived mutation caveat still applies: block metadata must be rebuilt
-after `insert` and `merge_overlaps` before production integration.
+For 1,956,864 intervals, the extra `u32` start-order ends cost about 7.47 MiB
+and block minima cost about 0.23 MiB. Metadata must be rebuilt after mutation
+before production integration.

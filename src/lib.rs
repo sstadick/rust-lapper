@@ -116,8 +116,11 @@ where
     starts: Vec<I>,
     /// Sorted list of end positions,
     stops: Vec<I>,
+    /// End positions in the same order as `intervals`, for block-mask queries.
+    stops_by_start: Vec<I>,
     block_index: Vec<usize>,
     block_max_ends: Vec<I>,
+    block_min_ends: Vec<I>,
     block_prefix_max_ends: Vec<I>,
     /// The length of the longest interval
     max_len: I,
@@ -205,18 +208,17 @@ where
         #[cfg(not(feature = "sort_unstable"))]
         intervals.sort();
 
-        let (mut starts, mut stops): (Vec<_>, Vec<_>) =
+        let (starts, mut stops): (Vec<_>, Vec<_>) =
             intervals.iter().map(|x| (x.start, x.stop)).unzip();
+        let stops_by_start = stops.clone();
 
         #[cfg(feature = "sort_unstable")]
         {
-            starts.sort_unstable();
             stops.sort_unstable();
         }
 
         #[cfg(not(feature = "sort_unstable"))]
         {
-            starts.sort();
             stops.sort();
         }
 
@@ -232,14 +234,20 @@ where
         }
 
         let mut block_max_ends = Vec::new();
+        let mut block_min_ends = Vec::new();
         for block in intervals.chunks(INDEX_BLOCK_SIZE) {
             let mut max_end = block[0].stop;
+            let mut min_end = max_end;
             for interval in &block[1..] {
                 if interval.stop > max_end {
                     max_end = interval.stop;
                 }
+                if interval.stop < min_end {
+                    min_end = interval.stop;
+                }
             }
             block_max_ends.push(max_end);
+            block_min_ends.push(min_end);
         }
 
         let block_count = block_max_ends.len();
@@ -267,8 +275,10 @@ where
             intervals,
             starts,
             stops,
+            stops_by_start,
             block_index,
             block_max_ends,
+            block_min_ends,
             block_prefix_max_ends,
             max_len,
             cov: None,
@@ -668,12 +678,14 @@ where
     /// ```
     #[inline]
     pub fn find(&self, start: I, stop: I) -> IterFind<'_, I, T> {
+        let off = self
+            .block_prefix_max_ends
+            .partition_point(|max_end| *max_end <= start)
+            * INDEX_BLOCK_SIZE;
         IterFind {
             inner: self,
-            off: self
-                .block_prefix_max_ends
-                .partition_point(|max_end| *max_end <= start)
-                * INDEX_BLOCK_SIZE,
+            off,
+            next_block_start: off,
             start,
             stop,
         }
@@ -714,8 +726,173 @@ where
         IterFind {
             inner: self,
             off: *cursor,
+            next_block_start: (*cursor).div_ceil(INDEX_BLOCK_SIZE) * INDEX_BLOCK_SIZE,
             start,
             stop,
+        }
+    }
+}
+
+impl<T> Lapper<u32, T>
+where
+    T: Eq + Clone + Send + Sync,
+{
+    /// Experimental forward iterator that computes and retains one overlap
+    /// mask for each candidate block.
+    #[inline]
+    pub fn find_block_mask(&self, start: u32, stop: u32) -> IterFindBlockMask<'_, T> {
+        let next_block_start = self
+            .block_prefix_max_ends
+            .partition_point(|max_end| *max_end <= start)
+            * INDEX_BLOCK_SIZE;
+        IterFindBlockMask {
+            inner: self,
+            next_block_start,
+            mask_block_start: 0,
+            mask: 0,
+            dense_next: 0,
+            dense_end: 0,
+            start,
+            stop,
+        }
+    }
+}
+
+/// Experimental `u32` iterator that consumes a saved candidate-block mask.
+#[derive(Debug)]
+pub struct IterFindBlockMask<'a, T>
+where
+    T: Eq + Clone + Send + Sync + 'a,
+{
+    inner: &'a Lapper<u32, T>,
+    next_block_start: usize,
+    mask_block_start: usize,
+    mask: u32,
+    dense_next: usize,
+    dense_end: usize,
+    start: u32,
+    stop: u32,
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline(always)]
+fn overlap_mask(starts: &[u32], stops: &[u32], query_start: u32, query_stop: u32) -> u32 {
+    use std::arch::aarch64::{
+        vandq_u32, vcgtq_u32, vdupq_n_u32, vgetq_lane_u32, vld1q_u32, vshrq_n_u32,
+    };
+
+    debug_assert_eq!(starts.len(), stops.len());
+    debug_assert!(starts.len() <= INDEX_BLOCK_SIZE);
+
+    let mut mask = 0_u32;
+    let simd_len = starts.len() / 4 * 4;
+
+    unsafe {
+        let query_start = vdupq_n_u32(query_start);
+        let query_stop = vdupq_n_u32(query_stop);
+        let mut lane = 0;
+        while lane < simd_len {
+            let lane_starts = vld1q_u32(starts.as_ptr().add(lane));
+            let lane_stops = vld1q_u32(stops.as_ptr().add(lane));
+            let overlapping = vandq_u32(
+                vcgtq_u32(lane_stops, query_start),
+                vcgtq_u32(query_stop, lane_starts),
+            );
+            let bits = vshrq_n_u32::<31>(overlapping);
+            mask |= vgetq_lane_u32::<0>(bits) << lane;
+            mask |= vgetq_lane_u32::<1>(bits) << (lane + 1);
+            mask |= vgetq_lane_u32::<2>(bits) << (lane + 2);
+            mask |= vgetq_lane_u32::<3>(bits) << (lane + 3);
+            lane += 4;
+        }
+    }
+
+    for lane in simd_len..starts.len() {
+        if stops[lane] > query_start && starts[lane] < query_stop {
+            mask |= 1 << lane;
+        }
+    }
+    mask
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+#[inline(always)]
+fn overlap_mask(starts: &[u32], stops: &[u32], query_start: u32, query_stop: u32) -> u32 {
+    debug_assert_eq!(starts.len(), stops.len());
+    debug_assert!(starts.len() <= INDEX_BLOCK_SIZE);
+
+    let mut mask = 0_u32;
+    for lane in 0..starts.len() {
+        if stops[lane] > query_start && starts[lane] < query_stop {
+            mask |= 1 << lane;
+        }
+    }
+    mask
+}
+
+impl<'a, T> Iterator for IterFindBlockMask<'a, T>
+where
+    T: Eq + Clone + Send + Sync + 'a,
+{
+    type Item = &'a Interval<u32, T>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.dense_next < self.dense_end {
+                let index = self.dense_next;
+                self.dense_next += 1;
+                return Some(&self.inner.intervals[index]);
+            }
+
+            if self.mask != 0 {
+                let lane = self.mask.trailing_zeros() as usize;
+                self.mask &= self.mask - 1;
+                return Some(&self.inner.intervals[self.mask_block_start + lane]);
+            }
+
+            let block_start = self.next_block_start;
+            if block_start >= self.inner.intervals.len()
+                || self.inner.starts[block_start] >= self.stop
+            {
+                return None;
+            }
+
+            let block = block_start / INDEX_BLOCK_SIZE;
+            if self.inner.block_max_ends[block] <= self.start {
+                self.next_block_start = self.inner.block_index[block] * INDEX_BLOCK_SIZE;
+                continue;
+            }
+
+            let block_end = (block_start + INDEX_BLOCK_SIZE).min(self.inner.intervals.len());
+            if self.inner.block_min_ends[block] > self.start {
+                let starts = &self.inner.starts[block_start..block_end];
+                let active_len = if starts
+                    .last()
+                    .is_some_and(|lane_start| *lane_start < self.stop)
+                {
+                    starts.len()
+                } else {
+                    starts.partition_point(|lane_start| *lane_start < self.stop)
+                };
+                self.dense_next = block_start;
+                self.dense_end = block_start + active_len;
+                self.next_block_start = if active_len == starts.len() {
+                    block_end
+                } else {
+                    self.inner.intervals.len()
+                };
+                continue;
+            }
+
+            self.mask_block_start = block_start;
+            self.next_block_start = block_end;
+            self.mask = overlap_mask(
+                &self.inner.starts[block_start..block_end],
+                &self.inner.stops_by_start[block_start..block_end],
+                self.start,
+                self.stop,
+            );
         }
     }
 }
@@ -729,6 +906,7 @@ where
 {
     inner: &'a Lapper<I, T>,
     off: usize,
+    next_block_start: usize,
     start: I,
     stop: I,
 }
@@ -742,12 +920,14 @@ where
     fn next_blockwise(&mut self) -> Option<&'a Interval<I, T>> {
         while self.off < self.inner.intervals.len() {
             let curr = self.off;
-            if curr.is_multiple_of(INDEX_BLOCK_SIZE) {
+            if curr == self.next_block_start {
                 let block = curr / INDEX_BLOCK_SIZE;
                 if self.inner.block_max_ends[block] <= self.start {
                     self.off = self.inner.block_index[block] * INDEX_BLOCK_SIZE;
+                    self.next_block_start = self.off;
                     continue;
                 }
+                self.next_block_start += INDEX_BLOCK_SIZE;
             }
 
             let interval = &self.inner.intervals[curr];
