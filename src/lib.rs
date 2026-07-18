@@ -777,9 +777,7 @@ where
 #[cfg(target_arch = "aarch64")]
 #[inline(always)]
 fn overlap_mask(starts: &[u32], stops: &[u32], query_start: u32, query_stop: u32) -> u32 {
-    use std::arch::aarch64::{
-        vandq_u32, vcgtq_u32, vdupq_n_u32, vgetq_lane_u32, vld1q_u32, vshrq_n_u32,
-    };
+    use std::arch::aarch64::{vaddvq_u32, vandq_u32, vcgtq_u32, vdupq_n_u32, vld1q_u32};
 
     debug_assert_eq!(starts.len(), stops.len());
     debug_assert!(starts.len() <= INDEX_BLOCK_SIZE);
@@ -790,6 +788,7 @@ fn overlap_mask(starts: &[u32], stops: &[u32], query_start: u32, query_stop: u32
     unsafe {
         let query_start = vdupq_n_u32(query_start);
         let query_stop = vdupq_n_u32(query_stop);
+        let bit_weights = vld1q_u32([1_u32, 2, 4, 8].as_ptr());
         let mut lane = 0;
         while lane < simd_len {
             let lane_starts = vld1q_u32(starts.as_ptr().add(lane));
@@ -798,11 +797,8 @@ fn overlap_mask(starts: &[u32], stops: &[u32], query_start: u32, query_stop: u32
                 vcgtq_u32(lane_stops, query_start),
                 vcgtq_u32(query_stop, lane_starts),
             );
-            let bits = vshrq_n_u32::<31>(overlapping);
-            mask |= vgetq_lane_u32::<0>(bits) << lane;
-            mask |= vgetq_lane_u32::<1>(bits) << (lane + 1);
-            mask |= vgetq_lane_u32::<2>(bits) << (lane + 2);
-            mask |= vgetq_lane_u32::<3>(bits) << (lane + 3);
+            let bits = vaddvq_u32(vandq_u32(overlapping, bit_weights));
+            mask |= bits << lane;
             lane += 4;
         }
     }
