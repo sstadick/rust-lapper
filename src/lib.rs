@@ -82,6 +82,8 @@ use num_traits::{
 use std::cmp::Ordering::{self};
 use std::collections::VecDeque;
 
+const INDEX_BLOCK_SIZE: usize = 32;
+
 #[cfg(feature = "with_serde")]
 use serde::{Deserialize, Serialize};
 
@@ -114,6 +116,9 @@ where
     starts: Vec<I>,
     /// Sorted list of end positions,
     stops: Vec<I>,
+    block_index: Vec<usize>,
+    block_max_ends: Vec<I>,
+    block_prefix_max_ends: Vec<I>,
     /// The length of the longest interval
     max_len: I,
     /// The calculated number of positions covered by the intervals
@@ -216,7 +221,7 @@ where
         }
 
         let mut max_len = zero::<I>();
-        for interval in intervals.iter() {
+        for interval in &intervals {
             let i_len = interval
                 .stop
                 .checked_sub(&interval.start)
@@ -225,10 +230,46 @@ where
                 max_len = i_len;
             }
         }
+
+        let mut block_max_ends = Vec::new();
+        for block in intervals.chunks(INDEX_BLOCK_SIZE) {
+            let mut max_end = block[0].stop;
+            for interval in &block[1..] {
+                if interval.stop > max_end {
+                    max_end = interval.stop;
+                }
+            }
+            block_max_ends.push(max_end);
+        }
+
+        let block_count = block_max_ends.len();
+        let mut block_index = vec![block_count; block_count];
+        let mut stack = Vec::<usize>::new();
+        for i in (0..block_count).rev() {
+            while stack
+                .last()
+                .is_some_and(|j| block_max_ends[*j] <= block_max_ends[i])
+            {
+                stack.pop();
+            }
+            block_index[i] = stack.last().copied().unwrap_or(block_count);
+            stack.push(i);
+        }
+
+        let mut block_prefix_max_ends = block_max_ends.clone();
+        for i in 1..block_prefix_max_ends.len() {
+            if block_prefix_max_ends[i] < block_prefix_max_ends[i - 1] {
+                block_prefix_max_ends[i] = block_prefix_max_ends[i - 1];
+            }
+        }
+
         Lapper {
             intervals,
             starts,
             stops,
+            block_index,
+            block_max_ends,
+            block_prefix_max_ends,
             max_len,
             cov: None,
             overlaps_merged: false,
@@ -629,10 +670,10 @@ where
     pub fn find(&self, start: I, stop: I) -> IterFind<'_, I, T> {
         IterFind {
             inner: self,
-            off: Self::lower_bound(
-                start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>),
-                &self.intervals,
-            ),
+            off: self
+                .block_prefix_max_ends
+                .partition_point(|max_end| *max_end <= start)
+                * INDEX_BLOCK_SIZE,
             start,
             stop,
         }
@@ -692,6 +733,36 @@ where
     stop: I,
 }
 
+impl<'a, I, T> IterFind<'a, I, T>
+where
+    T: Eq + Clone + Send + Sync + 'a,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+{
+    #[inline(always)]
+    fn next_blockwise(&mut self) -> Option<&'a Interval<I, T>> {
+        while self.off < self.inner.intervals.len() {
+            let curr = self.off;
+            if curr.is_multiple_of(INDEX_BLOCK_SIZE) {
+                let block = curr / INDEX_BLOCK_SIZE;
+                if self.inner.block_max_ends[block] <= self.start {
+                    self.off = self.inner.block_index[block] * INDEX_BLOCK_SIZE;
+                    continue;
+                }
+            }
+
+            let interval = &self.inner.intervals[curr];
+            self.off += 1;
+            if interval.start >= self.stop {
+                break;
+            }
+            if interval.stop > self.start {
+                return Some(interval);
+            }
+        }
+        None
+    }
+}
+
 impl<'a, I, T> Iterator for IterFind<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
@@ -700,20 +771,8 @@ where
     type Item = &'a Interval<I, T>;
 
     #[inline]
-    // interval.start < stop && interval.stop > start
     fn next(&mut self) -> Option<Self::Item> {
-        while self.off < self.inner.intervals.len() {
-            //let mut generator = self.inner.intervals[self.off..].iter();
-            //while let Some(interval) = generator.next() {
-            let interval = &self.inner.intervals[self.off];
-            self.off += 1;
-            if interval.overlap(self.start, self.stop) {
-                return Some(interval);
-            } else if interval.start >= self.stop {
-                break;
-            }
-        }
-        None
+        self.next_blockwise()
     }
 }
 
