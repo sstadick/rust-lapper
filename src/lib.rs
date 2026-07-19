@@ -77,15 +77,17 @@
 //! ```
 use num_traits::{
     identities::{one, zero},
-    PrimInt, Unsigned,
+    PrimInt,
 };
 use std::cmp::Ordering::{self};
 use std::collections::VecDeque;
 
-const INDEX_BLOCK_SIZE: usize = 32;
+mod simd;
+
+use simd::{detect_backend, overlap_mask, MaskBackend, BLOCK_SIZE as INDEX_BLOCK_SIZE};
 
 #[cfg(feature = "with_serde")]
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Represent a range from [start, stop)
 /// Inclusive start, exclusive of stop
@@ -93,7 +95,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Eq, Debug, Clone)]
 pub struct Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     pub start: I,
@@ -103,11 +105,10 @@ where
 
 /// Primary object of the library. The public intervals holds all the intervals and can be used for
 /// iterating / pulling values out of the tree.
-#[cfg_attr(feature = "with_serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub struct Lapper<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     /// List of intervals
@@ -130,9 +131,64 @@ where
     pub overlaps_merged: bool,
 }
 
+#[cfg(feature = "with_serde")]
+impl<I, T> Serialize for Lapper<I, T>
+where
+    I: PrimInt + Ord + Clone + Send + Sync + Serialize,
+    T: Eq + Clone + Send + Sync + Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("Lapper", 6)?;
+        state.serialize_field("intervals", &self.intervals)?;
+        state.serialize_field("starts", &self.starts)?;
+        state.serialize_field("stops", &self.stops)?;
+        state.serialize_field("max_len", &self.max_len)?;
+        state.serialize_field("cov", &self.cov)?;
+        state.serialize_field("overlaps_merged", &self.overlaps_merged)?;
+        state.end()
+    }
+}
+
+#[cfg(feature = "with_serde")]
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct SerializedLapper<I, T>
+where
+    I: PrimInt + Ord + Clone + Send + Sync,
+    T: Eq + Clone + Send + Sync,
+{
+    intervals: Vec<Interval<I, T>>,
+    starts: Vec<I>,
+    stops: Vec<I>,
+    max_len: I,
+    cov: Option<I>,
+    overlaps_merged: bool,
+}
+
+#[cfg(feature = "with_serde")]
+impl<'de, I, T> Deserialize<'de> for Lapper<I, T>
+where
+    I: PrimInt + Ord + Clone + Send + Sync + Deserialize<'de> + 'static,
+    T: Eq + Clone + Send + Sync + Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let serialized = SerializedLapper::<I, T>::deserialize(deserializer)?;
+        let mut lapper = Self::new(serialized.intervals);
+        lapper.cov = serialized.cov;
+        lapper.overlaps_merged = serialized.overlaps_merged;
+        Ok(lapper)
+    }
+}
+
 impl<I, T> Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     /// Compute the intsect between two intervals
@@ -152,7 +208,7 @@ where
 
 impl<I, T> Ord for Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -167,7 +223,7 @@ where
 
 impl<I, T> PartialOrd for Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -178,7 +234,7 @@ where
 
 impl<I, T> PartialEq for Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -189,7 +245,7 @@ where
 
 impl<I, T> Lapper<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync + 'static,
     T: Eq + Clone + Send + Sync,
 {
     /// Create a new instance of Lapper by passing in a vector of Intervals. This vector will
@@ -208,81 +264,87 @@ where
         #[cfg(not(feature = "sort_unstable"))]
         intervals.sort();
 
-        let (starts, mut stops): (Vec<_>, Vec<_>) =
-            intervals.iter().map(|x| (x.start, x.stop)).unzip();
-        let stops_by_start = stops.clone();
+        let mut lapper = Lapper {
+            intervals,
+            starts: Vec::new(),
+            stops: Vec::new(),
+            stops_by_start: Vec::new(),
+            block_index: Vec::new(),
+            block_max_ends: Vec::new(),
+            block_min_ends: Vec::new(),
+            block_prefix_max_ends: Vec::new(),
+            max_len: zero::<I>(),
+            cov: None,
+            overlaps_merged: false,
+        };
+        lapper.rebuild_derived();
+        lapper
+    }
 
-        #[cfg(feature = "sort_unstable")]
-        {
-            stops.sort_unstable();
-        }
+    fn rebuild_derived(&mut self) {
+        self.starts.clear();
+        self.stops.clear();
+        self.stops_by_start.clear();
+        self.starts.reserve(self.intervals.len());
+        self.stops.reserve(self.intervals.len());
+        self.stops_by_start.reserve(self.intervals.len());
 
-        #[cfg(not(feature = "sort_unstable"))]
-        {
-            stops.sort();
-        }
-
-        let mut max_len = zero::<I>();
-        for interval in &intervals {
-            let i_len = interval
+        self.max_len = zero::<I>();
+        for interval in &self.intervals {
+            self.starts.push(interval.start);
+            self.stops.push(interval.stop);
+            self.stops_by_start.push(interval.stop);
+            let length = interval
                 .stop
                 .checked_sub(&interval.start)
                 .unwrap_or_else(zero::<I>);
-            if i_len > max_len {
-                max_len = i_len;
+            if length > self.max_len {
+                self.max_len = length;
             }
         }
 
-        let mut block_max_ends = Vec::new();
-        let mut block_min_ends = Vec::new();
-        for block in intervals.chunks(INDEX_BLOCK_SIZE) {
+        #[cfg(feature = "sort_unstable")]
+        self.stops.sort_unstable();
+
+        #[cfg(not(feature = "sort_unstable"))]
+        self.stops.sort();
+
+        self.block_max_ends.clear();
+        self.block_min_ends.clear();
+        let block_count = self.intervals.len().div_ceil(INDEX_BLOCK_SIZE);
+        self.block_max_ends.reserve(block_count);
+        self.block_min_ends.reserve(block_count);
+        for block in self.intervals.chunks(INDEX_BLOCK_SIZE) {
             let mut max_end = block[0].stop;
             let mut min_end = max_end;
             for interval in &block[1..] {
-                if interval.stop > max_end {
-                    max_end = interval.stop;
-                }
-                if interval.stop < min_end {
-                    min_end = interval.stop;
-                }
+                max_end = std::cmp::max(max_end, interval.stop);
+                min_end = std::cmp::min(min_end, interval.stop);
             }
-            block_max_ends.push(max_end);
-            block_min_ends.push(min_end);
+            self.block_max_ends.push(max_end);
+            self.block_min_ends.push(min_end);
         }
 
-        let block_count = block_max_ends.len();
-        let mut block_index = vec![block_count; block_count];
+        self.block_index.clear();
+        self.block_index.resize(block_count, block_count);
         let mut stack = Vec::<usize>::new();
-        for i in (0..block_count).rev() {
+        for block in (0..block_count).rev() {
             while stack
                 .last()
-                .is_some_and(|j| block_max_ends[*j] <= block_max_ends[i])
+                .is_some_and(|next| self.block_max_ends[*next] <= self.block_max_ends[block])
             {
                 stack.pop();
             }
-            block_index[i] = stack.last().copied().unwrap_or(block_count);
-            stack.push(i);
+            self.block_index[block] = stack.last().copied().unwrap_or(block_count);
+            stack.push(block);
         }
 
-        let mut block_prefix_max_ends = block_max_ends.clone();
-        for i in 1..block_prefix_max_ends.len() {
-            if block_prefix_max_ends[i] < block_prefix_max_ends[i - 1] {
-                block_prefix_max_ends[i] = block_prefix_max_ends[i - 1];
-            }
-        }
-
-        Lapper {
-            intervals,
-            starts,
-            stops,
-            stops_by_start,
-            block_index,
-            block_max_ends,
-            block_min_ends,
-            block_prefix_max_ends,
-            max_len,
-            cov: None,
-            overlaps_merged: false,
+        self.block_prefix_max_ends.clone_from(&self.block_max_ends);
+        for block in 1..block_count {
+            self.block_prefix_max_ends[block] = std::cmp::max(
+                self.block_prefix_max_ends[block - 1],
+                self.block_prefix_max_ends[block],
+            );
         }
     }
 
@@ -309,16 +371,9 @@ where
     ///
     /// ```
     pub fn insert(&mut self, elem: Interval<I, T>) {
-        let starts_insert_index = Self::bsearch_seq(elem.start, &self.starts);
-        let stops_insert_index = Self::bsearch_seq(elem.stop, &self.stops);
         let intervals_insert_index = Self::bsearch_seq_ref(&elem, &self.intervals);
-        let i_len = elem.stop.checked_sub(&elem.start).unwrap_or_else(zero::<I>);
-        if i_len > self.max_len {
-            self.max_len = i_len;
-        }
-        self.starts.insert(starts_insert_index, elem.start);
-        self.stops.insert(stops_insert_index, elem.stop);
         self.intervals.insert(intervals_insert_index, elem);
+        self.rebuild_derived();
         self.cov = None;
         self.overlaps_merged = false;
     }
@@ -440,30 +495,7 @@ where
                 })
                 .collect();
         }
-        // Fix the starts and stops used by counts
-        let (mut starts, mut stops): (Vec<_>, Vec<_>) =
-            self.intervals.iter().map(|x| (x.start, x.stop)).unzip();
-
-        #[cfg(feature = "sort_unstable")]
-        {
-            starts.sort_unstable();
-            stops.sort_unstable();
-        }
-
-        #[cfg(not(feature = "sort_unstable"))]
-        {
-            starts.sort();
-            stops.sort();
-        }
-
-        self.starts = starts;
-        self.stops = stops;
-        self.max_len = self
-            .intervals
-            .iter()
-            .map(|x| x.stop.checked_sub(&x.start).unwrap_or_else(zero::<I>))
-            .max()
-            .unwrap_or_else(zero::<I>);
+        self.rebuild_derived();
     }
 
     /// Determine the first index that we should start checking for overlaps for via a binary
@@ -642,6 +674,7 @@ where
             inner: self,
             merged: merged_lapper,
             curr_merged_pos: zero::<I>(),
+            initialized: false,
             curr_pos: 0,
             cursor: 0,
             end: merged_len,
@@ -661,8 +694,9 @@ where
     #[inline]
     pub fn count(&self, start: I, stop: I) -> usize {
         let len = self.intervals.len();
-        // Plus one to account for half-openness of lapper intervals compared to BITS paper
-        let first = Self::bsearch_seq(start + one::<I>(), &self.stops);
+        let first = self
+            .stops
+            .partition_point(|interval_stop| *interval_stop <= start);
         let last = Self::bsearch_seq(stop, &self.starts);
         let num_cant_after = len - last;
         len - first - num_cant_after
@@ -684,8 +718,12 @@ where
             * INDEX_BLOCK_SIZE;
         IterFind {
             inner: self,
-            off,
             next_block_start: off,
+            mask_block_start: 0,
+            mask: 0,
+            dense_next: 0,
+            dense_end: 0,
+            backend: detect_backend(),
             start,
             stop,
         }
@@ -708,152 +746,59 @@ where
     /// ```
     #[inline]
     pub fn seek<'a>(&'a self, start: I, stop: I, cursor: &mut usize) -> IterFind<'a, I, T> {
+        let earliest_start = start
+            .checked_sub(&self.max_len)
+            .unwrap_or_else(I::min_value);
         if *cursor == 0 || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
         {
-            *cursor = Self::lower_bound(
-                start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>),
-                &self.intervals,
-            );
+            *cursor = Self::lower_bound(earliest_start, &self.intervals);
         }
 
         while *cursor + 1 < self.intervals.len()
-            && self.intervals[*cursor + 1].start
-                < start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>)
+            && self.intervals[*cursor + 1].start < earliest_start
         {
             *cursor += 1;
         }
 
         IterFind {
             inner: self,
-            off: *cursor,
-            next_block_start: (*cursor).div_ceil(INDEX_BLOCK_SIZE) * INDEX_BLOCK_SIZE,
-            start,
-            stop,
-        }
-    }
-}
-
-impl<T> Lapper<u32, T>
-where
-    T: Eq + Clone + Send + Sync,
-{
-    /// Experimental forward iterator that computes and retains one overlap
-    /// mask for each candidate block.
-    #[inline]
-    pub fn find_block_mask(&self, start: u32, stop: u32) -> IterFindBlockMask<'_, T> {
-        let next_block_start = self
-            .block_prefix_max_ends
-            .partition_point(|max_end| *max_end <= start)
-            * INDEX_BLOCK_SIZE;
-        IterFindBlockMask {
-            inner: self,
-            next_block_start,
+            next_block_start: (*cursor / INDEX_BLOCK_SIZE) * INDEX_BLOCK_SIZE,
             mask_block_start: 0,
             mask: 0,
             dense_next: 0,
             dense_end: 0,
+            backend: detect_backend(),
             start,
             stop,
         }
     }
 }
 
-/// Experimental `u32` iterator that consumes a saved candidate-block mask.
+/// Find Iterator
 #[derive(Debug)]
-pub struct IterFindBlockMask<'a, T>
+pub struct IterFind<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
-    inner: &'a Lapper<u32, T>,
+    inner: &'a Lapper<I, T>,
     next_block_start: usize,
     mask_block_start: usize,
     mask: u32,
     dense_next: usize,
     dense_end: usize,
-    start: u32,
-    stop: u32,
+    backend: MaskBackend,
+    start: I,
+    stop: I,
 }
 
-#[cfg(target_arch = "aarch64")]
-#[inline(always)]
-fn overlap_mask(starts: &[u32], stops: &[u32], query_start: u32, query_stop: u32) -> u32 {
-    use std::arch::aarch64::{
-        vaddvq_u16, vaddvq_u32, vandq_u16, vandq_u32, vcgtq_u32, vcombine_u16, vdupq_n_u32,
-        vld1q_u16, vld1q_u32, vld1q_u32_x2, vmovn_u32,
-    };
-
-    debug_assert_eq!(starts.len(), stops.len());
-    debug_assert!(starts.len() <= INDEX_BLOCK_SIZE);
-
-    let mut mask = 0_u32;
-    let simd_len = starts.len() / 4 * 4;
-
-    unsafe {
-        let query_start = vdupq_n_u32(query_start);
-        let query_stop = vdupq_n_u32(query_stop);
-        let weights4 = vld1q_u32([1_u32, 2, 4, 8].as_ptr());
-        let weights8 = vld1q_u16([1_u16, 2, 4, 8, 16, 32, 64, 128].as_ptr());
-        let mut lane = 0;
-        while lane + 8 <= simd_len {
-            let lane_starts = vld1q_u32_x2(starts.as_ptr().add(lane));
-            let lane_stops = vld1q_u32_x2(stops.as_ptr().add(lane));
-            let overlapping0 = vandq_u32(
-                vcgtq_u32(lane_stops.0, query_start),
-                vcgtq_u32(query_stop, lane_starts.0),
-            );
-            let overlapping1 = vandq_u32(
-                vcgtq_u32(lane_stops.1, query_start),
-                vcgtq_u32(query_stop, lane_starts.1),
-            );
-            let overlapping = vcombine_u16(vmovn_u32(overlapping0), vmovn_u32(overlapping1));
-            let bits = vaddvq_u16(vandq_u16(overlapping, weights8));
-            mask |= u32::from(bits) << lane;
-            lane += 8;
-        }
-        while lane < simd_len {
-            let lane_starts = vld1q_u32(starts.as_ptr().add(lane));
-            let lane_stops = vld1q_u32(stops.as_ptr().add(lane));
-            let overlapping = vandq_u32(
-                vcgtq_u32(lane_stops, query_start),
-                vcgtq_u32(query_stop, lane_starts),
-            );
-            let bits = vaddvq_u32(vandq_u32(overlapping, weights4));
-            mask |= bits << lane;
-            lane += 4;
-        }
-    }
-
-    for lane in simd_len..starts.len() {
-        if stops[lane] > query_start && starts[lane] < query_stop {
-            mask |= 1 << lane;
-        }
-    }
-    mask
-}
-
-#[cfg(not(target_arch = "aarch64"))]
-#[inline(always)]
-fn overlap_mask(starts: &[u32], stops: &[u32], query_start: u32, query_stop: u32) -> u32 {
-    debug_assert_eq!(starts.len(), stops.len());
-    debug_assert!(starts.len() <= INDEX_BLOCK_SIZE);
-
-    let mut mask = 0_u32;
-    for lane in 0..starts.len() {
-        if stops[lane] > query_start && starts[lane] < query_stop {
-            mask |= 1 << lane;
-        }
-    }
-    mask
-}
-
-impl<'a, T> Iterator for IterFindBlockMask<'a, T>
+impl<'a, I, T> IterFind<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
+    I: PrimInt + Ord + Clone + Send + Sync + 'static,
 {
-    type Item = &'a Interval<u32, T>;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
+    #[inline(always)]
+    fn next_blockwise(&mut self) -> Option<&'a Interval<I, T>> {
         loop {
             if self.dense_next < self.dense_end {
                 let index = self.dense_next;
@@ -868,21 +813,28 @@ where
             }
 
             let block_start = self.next_block_start;
-            if block_start >= self.inner.intervals.len() {
+            if block_start >= self.inner.starts.len() {
                 return None;
             }
+
+            // Private arrays are rebuilt together by constructors, mutations,
+            // and deserialization. Public interval edits cannot extend this bound.
             if unsafe { *self.inner.starts.get_unchecked(block_start) } >= self.stop {
                 return None;
             }
 
             let block = block_start / INDEX_BLOCK_SIZE;
             if unsafe { *self.inner.block_max_ends.get_unchecked(block) } <= self.start {
-                self.next_block_start =
-                    unsafe { *self.inner.block_index.get_unchecked(block) } * INDEX_BLOCK_SIZE;
+                let next_block = unsafe { *self.inner.block_index.get_unchecked(block) };
+                debug_assert!(
+                    next_block <= self.inner.block_index.len(),
+                    "Lapper block index is corrupt"
+                );
+                self.next_block_start = next_block * INDEX_BLOCK_SIZE;
                 continue;
             }
 
-            let block_end = (block_start + INDEX_BLOCK_SIZE).min(self.inner.intervals.len());
+            let block_end = (block_start + INDEX_BLOCK_SIZE).min(self.inner.starts.len());
             if unsafe { *self.inner.block_min_ends.get_unchecked(block) } > self.start {
                 let starts = unsafe { self.inner.starts.get_unchecked(block_start..block_end) };
                 let active_len = if unsafe { *starts.get_unchecked(starts.len() - 1) } < self.stop {
@@ -895,7 +847,7 @@ where
                 self.next_block_start = if active_len == starts.len() {
                     block_end
                 } else {
-                    self.inner.intervals.len()
+                    self.inner.starts.len()
                 };
                 continue;
             }
@@ -903,6 +855,7 @@ where
             self.mask_block_start = block_start;
             self.next_block_start = block_end;
             self.mask = overlap_mask(
+                self.backend,
                 unsafe { self.inner.starts.get_unchecked(block_start..block_end) },
                 unsafe {
                     self.inner
@@ -916,56 +869,10 @@ where
     }
 }
 
-/// Find Iterator
-#[derive(Debug)]
-pub struct IterFind<'a, I, T>
-where
-    T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-{
-    inner: &'a Lapper<I, T>,
-    off: usize,
-    next_block_start: usize,
-    start: I,
-    stop: I,
-}
-
-impl<'a, I, T> IterFind<'a, I, T>
-where
-    T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
-{
-    #[inline(always)]
-    fn next_blockwise(&mut self) -> Option<&'a Interval<I, T>> {
-        while self.off < self.inner.intervals.len() {
-            let curr = self.off;
-            if curr == self.next_block_start {
-                let block = curr / INDEX_BLOCK_SIZE;
-                if self.inner.block_max_ends[block] <= self.start {
-                    self.off = self.inner.block_index[block] * INDEX_BLOCK_SIZE;
-                    self.next_block_start = self.off;
-                    continue;
-                }
-                self.next_block_start += INDEX_BLOCK_SIZE;
-            }
-
-            let interval = &self.inner.intervals[curr];
-            self.off += 1;
-            if interval.start >= self.stop {
-                break;
-            }
-            if interval.stop > self.start {
-                return Some(interval);
-            }
-        }
-        None
-    }
-}
-
 impl<'a, I, T> Iterator for IterFind<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync + 'static,
 {
     type Item = &'a Interval<I, T>;
 
@@ -980,28 +887,30 @@ where
 pub struct IterDepth<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     inner: &'a Lapper<I, T>,
     merged: Lapper<I, bool>, // A lapper that is the merged_lapper of inner
     curr_merged_pos: I,      // Current start position in current interval
-    curr_pos: usize,         // In merged list of non-overlapping intervals
-    cursor: usize,           // cursor for seek over inner lapper
-    end: usize,              // len of merged
+    initialized: bool,
+    curr_pos: usize, // In merged list of non-overlapping intervals
+    cursor: usize,   // cursor for seek over inner lapper
+    end: usize,      // len of merged
 }
 
 impl<'a, I, T> Iterator for IterDepth<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync + 'static,
 {
     type Item = Interval<I, I>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let mut interval: &Interval<I, bool> = &self.merged.intervals[self.curr_pos];
-        if self.curr_merged_pos == zero::<I>() {
+        if !self.initialized {
             self.curr_merged_pos = interval.start;
+            self.initialized = true;
         }
         if interval.stop == self.curr_merged_pos {
             if self.curr_pos + 1 != self.end {
@@ -1044,7 +953,7 @@ where
 pub struct IterLapper<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     inner: &'a Lapper<I, T>,
     pos: usize,
@@ -1053,7 +962,7 @@ where
 impl<'a, I, T> Iterator for IterLapper<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
 
@@ -1070,7 +979,7 @@ where
 impl<I, T> IntoIterator for Lapper<I, T>
 where
     T: Eq + Clone + Send + Sync,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     type Item = Interval<I, T>;
     type IntoIter = ::std::vec::IntoIter<Self::Item>;
@@ -1083,7 +992,7 @@ where
 impl<'a, I, T> IntoIterator for &'a Lapper<I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
     type IntoIter = std::slice::Iter<'a, Interval<I, T>>;
@@ -1096,7 +1005,7 @@ where
 impl<'a, I, T> IntoIterator for &'a mut Lapper<I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     type Item = &'a mut Interval<I, T>;
     type IntoIter = std::slice::IterMut<'a, Interval<I, T>>;

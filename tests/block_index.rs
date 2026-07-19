@@ -29,10 +29,6 @@ fn block_index_matches_forward_brute_force() {
         let start = next() % 1_000_000;
         let stop = start + 1 + next() % 2000;
         let got: Vec<_> = lapper.find(start, stop).map(|iv| iv.val).collect();
-        let got_mask: Vec<_> = lapper
-            .find_block_mask(start, stop)
-            .map(|iv| iv.val)
-            .collect();
         let expected: Vec<_> = lapper
             .intervals
             .iter()
@@ -40,6 +36,5 @@ fn block_index_matches_forward_brute_force() {
             .map(|iv| iv.val)
             .collect();
         assert_eq!(got, expected, "query {start}..{stop}");
-        assert_eq!(got_mask, expected, "block mask query {start}..{stop}");
     }
 }
