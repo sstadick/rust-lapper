@@ -1,13 +1,14 @@
-# SIMD block mask with weighted lane reduction
+# SIMD block mask with weighted lane reduction and paired loads
 
 This branch builds on the first exact SIMD-mask finalist. It keeps the
 32-interval block index, start-order end storage, block minima, and
 `Lapper<u32, T>::find_block_mask`.
 
-The new change is deliberately small: each four-lane NEON result is ANDed with
-bit weights `[1, 2, 4, 8]` and reduced with `vaddvq_u32`. This replaces four
-lane extractions plus their scalar shifts and ORs with one horizontal sum and
-one scalar shift/OR.
+The weighted reduction remains unchanged: each four-lane NEON result is ANDed
+with bit weights `[1, 2, 4, 8]` and reduced with `vaddvq_u32`. The follow-up
+uses `vld1q_u32_x2` to load eight adjacent starts or stops into two registers
+per iteration. This lets AArch64 select a multi-register `LD1` form while the
+same two four-lane masks are assembled in forward order.
 
 Every candidate block takes one exact route:
 
@@ -21,13 +22,16 @@ There is no score, sampling heuristic, data classifier, or query mode switch.
 The scalar fallback is correct but was not performance-tested. The measured
 SIMD path is specialized to `u32` on AArch64.
 
-Seven-repeat same-session means against the original mask prototype:
+Fifteen paired trials against the weighted single-load version, alternating
+execution order and using two unreported warmups per sample:
 
-| Case | Original mask query | Weighted query | Change |
+| Case | Single-load query | Paired-load query | Paired median change |
 |---|---:|---:|---:|
-| `1-2` | 4.126 ms | 3.551 ms | -13.9% |
-| `7-3` | 55.261 ms | 49.575 ms | -10.3% |
-| `8-7` | 604.449 ms | 567.982 ms | -6.0% |
+| `1-2` | 3.595 ms | 3.443 ms | -4.6% |
+| `7-3` | 51.008 ms | 49.410 ms | -3.1% |
+
+A separate nine-repeat dense run measured 579.273 ms for the single-load
+version and 579.313 ms for paired loads, which is neutral.
 
 For 1,956,864 intervals, the extra `u32` start-order ends cost about 7.47 MiB
 and block minima cost about 0.23 MiB. Metadata must be rebuilt after mutation
