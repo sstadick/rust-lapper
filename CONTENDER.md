@@ -1,4 +1,4 @@
-# SIMD block mask with paired loads and eight-lane reduction
+# SIMD block mask with proof-scoped unchecked indexing
 
 This branch builds on the first exact SIMD-mask finalist. It keeps the
 32-interval block index, start-order end storage, block minima, and
@@ -34,6 +34,26 @@ execution order and using two unreported warmups per sample:
 
 Both binaries were built with `-C target-cpu=native`. The eight-lane reduction
 improved the paired median in all three cases.
+
+This branch additionally removes redundant bounds checks for block metadata and
+the two input slices after checking `block_start < intervals.len()`. Construction
+keeps all sidecars at the same length, each block number is derived from a valid
+32-entry boundary, and `block_end` is clamped to the interval length. Result
+yields remain safely indexed.
+
+The inlined AArch64 query function falls from 442 to 382 static instructions and
+from nine bounds-panic edges to two. Fifteen alternating-order pairs against the
+safe eight-lane branch measured:
+
+| Case | Safe query | Unchecked-index query | Paired median change | Faster pairs |
+|---|---:|---:|---:|---:|
+| `1-2` | 3.251 ms | 3.008 ms | -7.7% | 15/15 |
+| `7-3` | 47.459 ms | 43.504 ms | -8.1% | 15/15 |
+| `8-7` | 573.038 ms | 566.117 ms | -1.0% | 10/15 |
+
+In a fresh five-library run this version beat SuperIntervals in total time on
+`1-2` (6.026 vs 6.129 ms) and `7-3` (66.783 vs 67.951 ms), and trailed on dense
+`8-7` (579.622 vs 548.992 ms).
 
 For 1,956,864 intervals, the extra `u32` start-order ends cost about 7.47 MiB
 and block minima cost about 0.23 MiB. Metadata must be rebuilt after mutation

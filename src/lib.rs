@@ -868,25 +868,24 @@ where
             }
 
             let block_start = self.next_block_start;
-            if block_start >= self.inner.intervals.len()
-                || self.inner.starts[block_start] >= self.stop
-            {
+            if block_start >= self.inner.intervals.len() {
+                return None;
+            }
+            if unsafe { *self.inner.starts.get_unchecked(block_start) } >= self.stop {
                 return None;
             }
 
             let block = block_start / INDEX_BLOCK_SIZE;
-            if self.inner.block_max_ends[block] <= self.start {
-                self.next_block_start = self.inner.block_index[block] * INDEX_BLOCK_SIZE;
+            if unsafe { *self.inner.block_max_ends.get_unchecked(block) } <= self.start {
+                self.next_block_start =
+                    unsafe { *self.inner.block_index.get_unchecked(block) } * INDEX_BLOCK_SIZE;
                 continue;
             }
 
             let block_end = (block_start + INDEX_BLOCK_SIZE).min(self.inner.intervals.len());
-            if self.inner.block_min_ends[block] > self.start {
-                let starts = &self.inner.starts[block_start..block_end];
-                let active_len = if starts
-                    .last()
-                    .is_some_and(|lane_start| *lane_start < self.stop)
-                {
+            if unsafe { *self.inner.block_min_ends.get_unchecked(block) } > self.start {
+                let starts = unsafe { self.inner.starts.get_unchecked(block_start..block_end) };
+                let active_len = if unsafe { *starts.get_unchecked(starts.len() - 1) } < self.stop {
                     starts.len()
                 } else {
                     starts.partition_point(|lane_start| *lane_start < self.stop)
@@ -904,8 +903,12 @@ where
             self.mask_block_start = block_start;
             self.next_block_start = block_end;
             self.mask = overlap_mask(
-                &self.inner.starts[block_start..block_end],
-                &self.inner.stops_by_start[block_start..block_end],
+                unsafe { self.inner.starts.get_unchecked(block_start..block_end) },
+                unsafe {
+                    self.inner
+                        .stops_by_start
+                        .get_unchecked(block_start..block_end)
+                },
                 self.start,
                 self.stop,
             );
