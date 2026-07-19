@@ -28,11 +28,12 @@ execution order and using two unreported warmups per sample:
 
 | Case | Two reductions | Eight-lane reduction | Paired median change | Faster pairs |
 |---|---:|---:|---:|---:|
-| `1-2` | 3.614 ms | 3.482 ms | -3.2% | 12/15 |
-| `7-3` | 49.464 ms | 48.376 ms | -2.1% | 14/15 |
-| `8-7` | 586.479 ms | 586.697 ms | -0.02% | 8/15 |
+| `1-2` | 3.380 ms | 3.221 ms | -4.4% | 15/15 |
+| `7-3` | 48.212 ms | 47.225 ms | -2.6% | 13/15 |
+| `8-7` | 573.589 ms | 570.430 ms | -1.1% | 13/15 |
 
-The dense result is effectively neutral rather than evidence of a speedup.
+Both binaries were built with `-C target-cpu=native`. The eight-lane reduction
+improved the paired median in all three cases.
 
 For 1,956,864 intervals, the extra `u32` start-order ends cost about 7.47 MiB
 and block minima cost about 0.23 MiB. Metadata must be rebuilt after mutation
