@@ -282,26 +282,26 @@ where
     }
 
     fn rebuild_derived(&mut self) {
-        self.starts.clear();
-        self.stops.clear();
-        self.stops_by_start.clear();
-        self.starts.reserve(self.intervals.len());
-        self.stops.reserve(self.intervals.len());
-        self.stops_by_start.reserve(self.intervals.len());
+        let (starts, stops_by_start): (Vec<_>, Vec<_>) = self
+            .intervals
+            .iter()
+            .map(|interval| (interval.start, interval.stop))
+            .unzip();
+        self.starts = starts;
+        self.stops = stops_by_start.clone();
+        self.stops_by_start = stops_by_start;
 
-        self.max_len = zero::<I>();
-        for interval in &self.intervals {
-            self.starts.push(interval.start);
-            self.stops.push(interval.stop);
-            self.stops_by_start.push(interval.stop);
-            let length = interval
-                .stop
-                .checked_sub(&interval.start)
-                .unwrap_or_else(zero::<I>);
-            if length > self.max_len {
-                self.max_len = length;
-            }
-        }
+        self.max_len = self
+            .intervals
+            .iter()
+            .map(|interval| {
+                interval
+                    .stop
+                    .checked_sub(&interval.start)
+                    .unwrap_or_else(zero::<I>)
+            })
+            .max()
+            .unwrap_or_else(zero::<I>);
 
         #[cfg(feature = "sort_unstable")]
         self.stops.sort_unstable();
