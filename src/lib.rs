@@ -778,7 +778,8 @@ where
 #[inline(always)]
 fn overlap_mask(starts: &[u32], stops: &[u32], query_start: u32, query_stop: u32) -> u32 {
     use std::arch::aarch64::{
-        vaddvq_u32, vandq_u32, vcgtq_u32, vdupq_n_u32, vld1q_u32, vld1q_u32_x2,
+        vaddvq_u16, vaddvq_u32, vandq_u16, vandq_u32, vcgtq_u32, vcombine_u16, vdupq_n_u32,
+        vld1q_u16, vld1q_u32, vld1q_u32_x2, vmovn_u32,
     };
 
     debug_assert_eq!(starts.len(), stops.len());
@@ -790,7 +791,8 @@ fn overlap_mask(starts: &[u32], stops: &[u32], query_start: u32, query_stop: u32
     unsafe {
         let query_start = vdupq_n_u32(query_start);
         let query_stop = vdupq_n_u32(query_stop);
-        let bit_weights = vld1q_u32([1_u32, 2, 4, 8].as_ptr());
+        let weights4 = vld1q_u32([1_u32, 2, 4, 8].as_ptr());
+        let weights8 = vld1q_u16([1_u16, 2, 4, 8, 16, 32, 64, 128].as_ptr());
         let mut lane = 0;
         while lane + 8 <= simd_len {
             let lane_starts = vld1q_u32_x2(starts.as_ptr().add(lane));
@@ -803,9 +805,9 @@ fn overlap_mask(starts: &[u32], stops: &[u32], query_start: u32, query_stop: u32
                 vcgtq_u32(lane_stops.1, query_start),
                 vcgtq_u32(query_stop, lane_starts.1),
             );
-            let bits0 = vaddvq_u32(vandq_u32(overlapping0, bit_weights));
-            let bits1 = vaddvq_u32(vandq_u32(overlapping1, bit_weights));
-            mask |= (bits0 | (bits1 << 4)) << lane;
+            let overlapping = vcombine_u16(vmovn_u32(overlapping0), vmovn_u32(overlapping1));
+            let bits = vaddvq_u16(vandq_u16(overlapping, weights8));
+            mask |= u32::from(bits) << lane;
             lane += 8;
         }
         while lane < simd_len {
@@ -815,7 +817,7 @@ fn overlap_mask(starts: &[u32], stops: &[u32], query_start: u32, query_stop: u32
                 vcgtq_u32(lane_stops, query_start),
                 vcgtq_u32(query_stop, lane_starts),
             );
-            let bits = vaddvq_u32(vandq_u32(overlapping, bit_weights));
+            let bits = vaddvq_u32(vandq_u32(overlapping, weights4));
             mask |= bits << lane;
             lane += 4;
         }
