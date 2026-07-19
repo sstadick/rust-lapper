@@ -1,60 +1,51 @@
-# SIMD block mask with proof-scoped unchecked indexing
+# Worked portable SIMD block index
 
-This branch builds on the first exact SIMD-mask finalist. It keeps the
-32-interval block index, start-order end storage, block minima, and
-`Lapper<u32, T>::find_block_mask`.
+This branch integrates the best forward-order contender into rust-lapper's
+normal API. `find()` and `seek()` retain their existing signatures and lazy,
+ascending-start output. There is no workload score, data classifier, mode flag,
+or alternate public query method.
 
-The loop uses `vld1q_u32_x2` to load eight adjacent starts or stops into two
-registers per iteration. It narrows the two four-lane comparison vectors into
-eight `u16` lanes, ANDs them with weights `[1, 2, 4, 8, 16, 32, 64, 128]`, and
-uses one `vaddvq_u16` reduction to produce eight mask bits. On the measured
-Apple M3 binary this compiles to paired `ldp` loads, one `uzp1.8h`, and one
-`addv.8h` per eight lanes.
+The implementation keeps one canonical start-sorted interval vector and adds
+fixed 32-entry block facts:
 
-Every candidate block takes one exact route:
+- a maximum end and a next-greater-block link for exact forward skips;
+- a minimum end for an exact all-ends-pass route;
+- a prefix maximum for finding the first possible block;
+- ends in start order for mixed-block masks.
 
-1. `max_end <= query.start`: jump over the all-miss block.
-2. `min_end > query.start`: all active lanes pass the end test, so return the
-   sorted-start prefix directly.
-3. Otherwise: calculate one NEON overlap mask, save it in the iterator, and
-   consume its low set bits in forward order across `next()` calls.
+Mixed blocks use NEON on AArch64, AVX2 when available on x86-64, and an exact
+scalar fallback elsewhere. The SIMD dispatch covers all primitive integer
+coordinate types from 8 through 64 bits, including `usize` and `isize`.
+Custom `PrimInt` implementations use the scalar mask.
 
-There is no score, sampling heuristic, data classifier, or query mode switch.
-The scalar fallback is correct but was not performance-tested. The measured
-SIMD path is specialized to `u32` on AArch64.
+`insert()`, `merge_overlaps()`, construction, and serde deserialization all run
+the same derived-index rebuild. Signed coordinates, minimum-value queries,
+`count()` at a type maximum, and depth spans crossing zero have dedicated tests.
+Serde keeps the original six-field representation and reconstructs the new
+private sidecars when reading it.
 
-Fifteen paired trials against the paired-load, two-reduction version, alternating
-execution order and using two unreported warmups per sample:
+The hot loop uses `get_unchecked` only after a length invariant has proved the
+private sidecars cover the candidate block. Returned intervals remain safely
+indexed. The assembly audit found no reason to add handwritten assembly: the
+AArch64 compiler output already contains paired loads, narrowing, and horizontal
+reduction, while forced-Haswell output contains the expected AVX2 compares and
+movemask instructions.
 
-| Case | Two reductions | Eight-lane reduction | Paired median change | Faster pairs |
-|---|---:|---:|---:|---:|
-| `1-2` | 3.380 ms | 3.221 ms | -4.4% | 15/15 |
-| `7-3` | 48.212 ms | 47.225 ms | -2.6% | 13/15 |
-| `8-7` | 573.589 ms | 570.430 ms | -1.1% | 13/15 |
+Fresh native five-library total medians:
 
-Both binaries were built with `-C target-cpu=native`. The eight-lane reduction
-improved the paired median in all three cases.
+| Case | SuperIntervals | Worked Lapper | COITrees | rust-bio IITree | rust-bio AVL |
+|---|---:|---:|---:|---:|---:|
+| `1-2` | 6.063 ms | **5.729 ms** | 10.415 ms | 13.311 ms | 42.062 ms |
+| `7-3` | 68.881 ms | **66.385 ms** | 89.782 ms | 149.975 ms | 344.913 ms |
+| `8-7` | **550.372 ms** | 588.766 ms | 834.219 ms | 1259.076 ms | 2140.363 ms |
 
-This branch additionally removes redundant bounds checks for block metadata and
-the two input slices after checking `block_start < intervals.len()`. Construction
-keeps all sidecars at the same length, each block number is derived from a valid
-32-entry boundary, and `block_end` is clamped to the interval length. Result
-yields remain safely indexed.
+Alternating direct trials confirmed the shape: Lapper won total time on 15/15
+`1-2` pairs, was 1.76% faster on `7-3`, and trailed by about 9.5% total on
+dense `8-7`. These are Apple M3 AArch64 measurements; AVX2 was compiled and
+instruction-audited but not timed on native Intel or AMD hardware.
 
-The inlined AArch64 query function falls from 442 to 382 static instructions and
-from nine bounds-panic edges to two. Fifteen alternating-order pairs against the
-safe eight-lane branch measured:
-
-| Case | Safe query | Unchecked-index query | Paired median change | Faster pairs |
-|---|---:|---:|---:|---:|
-| `1-2` | 3.251 ms | 3.008 ms | -7.7% | 15/15 |
-| `7-3` | 47.459 ms | 43.504 ms | -8.1% | 15/15 |
-| `8-7` | 573.038 ms | 566.117 ms | -1.0% | 10/15 |
-
-In a fresh five-library run this version beat SuperIntervals in total time on
-`1-2` (6.026 vs 6.129 ms) and `7-3` (66.783 vs 67.951 ms), and trailed on dense
-`8-7` (579.622 vs 548.992 ms).
-
-For 1,956,864 intervals, the extra `u32` start-order ends cost about 7.47 MiB
-and block minima cost about 0.23 MiB. Metadata must be rebuilt after mutation
-before production integration.
+See [`PORTABLE_SIMD_INDEX.md`](PORTABLE_SIMD_INDEX.md) for the full design,
+safety argument, compatibility notes, tests, measurements, and identity audit.
+For the intentionally narrow first ARM exercise, compare
+`contender/block-32` with `tutorial/aarch64-u32-hand-typed` using
+[`AARCH64_U32_HAND_TYPE.md`](AARCH64_U32_HAND_TYPE.md) on the tutorial branch.
