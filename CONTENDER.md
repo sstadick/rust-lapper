@@ -46,6 +46,7 @@ instruction-audited but not timed on native Intel or AMD hardware.
 
 See [`PORTABLE_SIMD_INDEX.md`](PORTABLE_SIMD_INDEX.md) for the full design,
 safety argument, compatibility notes, tests, measurements, and identity audit.
-For the intentionally narrow first ARM exercise, compare
-`contender/block-32` with `tutorial/aarch64-u32-hand-typed` using
-[`AARCH64_U32_HAND_TYPE.md`](AARCH64_U32_HAND_TYPE.md) on the tutorial branch.
+Use [`AARCH64_U32_HAND_TYPE.md`](AARCH64_U32_HAND_TYPE.md) on this branch as the
+single hand-typing course from original scalar Lapper through the full portable
+implementation. At its ARM checkpoints, the intentionally narrow answer code is
+the diff from `contender/block-32` to `tutorial/aarch64-u32-hand-typed`.

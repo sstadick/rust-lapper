@@ -376,10 +376,12 @@ Primary references used for the structural check:
 | `reference/aarch64-u32-hand-typed` | `b6ba527` | Exact full-reference comparison point |
 | `worked/portable-simd-index` | this branch | Mutation-safe, multi-type, multi-architecture integration |
 
-The tutorial starts from `contender/block-32` and intentionally excludes generic
-dispatch, AVX2, mutation rebuilding, and unchecked indexing. That keeps the first
-hand-typed ARM pass readable. The worked branch is the complete candidate, not the
-tutorial branch.
+The unified [`AARCH64_U32_HAND_TYPE.md`](AARCH64_U32_HAND_TYPE.md) course starts
+at `baseline/v1.3.0` and walks through every index and SIMD checkpoint. The
+`tutorial/aarch64-u32-hand-typed` branch remains a deliberately narrow code
+answer for the ARM portion: it excludes generic dispatch, AVX2, mutation
+rebuilding, and unchecked indexing so those operations can be learned once
+without production scaffolding.
 
 ## Remaining decisions
 
