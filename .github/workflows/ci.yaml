@@ -7,11 +7,14 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: stable
 
 jobs:
   msrv:
     name: MSRV 1.59
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: 1.59.0
     steps:
       - name: Checkout sources
         uses: actions/checkout@v7
