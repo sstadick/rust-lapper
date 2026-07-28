@@ -62,6 +62,14 @@ actual user impact documented.
 
 ## 4. Measure cached backend and type selection
 
+Status: complete and rejected. A construction-time dispatch experiment stored a
+typed mask function pointer in each `Lapper`, removing per-iterator backend
+selection and per-mixed-block `TypeId` selection. On an Apple M3, paired
+alternating measurements showed query regressions of 4.21% on `1-2`, 2.04% on
+`7-3`, and 1.49% on `8-7`. The cached variant won only 1/15, 0/15, and 0/10
+query pairs respectively. The indirect call costs more than the current
+compiler-folded checks, so the existing dispatch is retained.
+
 - Compare the current per-iterator backend detection and per-mask type
   selection with selection cached at `Lapper` construction.
 - Measure construction, query, and total time on all three retained datasets.
