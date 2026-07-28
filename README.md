@@ -32,6 +32,12 @@ algorithm](https://academic.oup.com/bioinformatics/article/29/1/1/273289)
 `rust-lapper` supports Rust 1.59 and newer. Rust 1.59 is the first stable
 release that provides the AArch64 intrinsics used by the NEON query backend.
 
+Query coordinates must be `'static` so private dispatch code can use `TypeId`
+before reinterpreting primitive integer slices for SIMD. This includes every
+primitive integer and ordinary owned custom numeric type; it does not require a
+`Lapper` value to live for the entire program. Non-primitive `PrimInt` types use
+the scalar mask implementation.
+
 ## Serde Support
 
 `rust-lapper` supports serialization with serde for `Lapper` and `Interval` objects:

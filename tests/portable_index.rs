@@ -81,11 +81,13 @@ fn every_primitive_integer_type_matches_forward_brute_force() {
     exercise_unsigned::<u16>();
     exercise_unsigned::<u32>();
     exercise_unsigned::<u64>();
+    exercise_unsigned::<u128>();
     exercise_unsigned::<usize>();
     exercise_signed::<i8>();
     exercise_signed::<i16>();
     exercise_signed::<i32>();
     exercise_signed::<i64>();
+    exercise_signed::<i128>();
     exercise_signed::<isize>();
 }
 

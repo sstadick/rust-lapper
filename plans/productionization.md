@@ -42,6 +42,14 @@ and any increase is intentional and documented.
 
 ## 3. Resolve the `I: 'static` API-bound addition
 
+Status: complete and accepted. Stable Rust has no specialization mechanism that
+can select primitive SIMD kernels while retaining a blanket scalar path for
+every custom `PrimInt`. Safe pointer reinterpretation therefore uses exact
+`TypeId` checks, which require `I: 'static`. This excludes only custom coordinate
+types carrying non-static borrows; it does not require a `Lapper` value to live
+for the program lifetime. Primitive types use SIMD, while `u128`, `i128`, and
+other unmatched owned `PrimInt` types use the tested scalar fallback.
+
 - Measure the public API difference from rust-lapper 1.3.0.
 - Determine whether safe primitive-type SIMD dispatch can avoid `TypeId` and
   the corresponding `I: 'static` bound without restricting custom `PrimInt`
