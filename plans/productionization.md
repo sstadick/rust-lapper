@@ -10,8 +10,9 @@ iteration order, exact overlap semantics, and always-on query algorithm.
 Status: in progress. On 2026-07-28, GitHub's native x86-64 runner reported an
 AMD EPYC 7763 with AVX2. Runtime dispatch selected AVX2 and every signed and
 unsigned AVX2 mask matched the scalar result. Rosetta separately exercised the
-x86-64 scalar selection. Native three-dataset performance measurements and a
-physical non-AVX2 x86 host remain outstanding.
+x86-64 scalar selection, and the final CI matrix ran the complete test suite
+under a QEMU Nehalem CPU model without AVX2. Native three-dataset performance
+measurements and a physical non-AVX2 x86 host remain outstanding.
 
 - Run the complete test suite on native x86-64 with AVX2 available.
 - Verify that the AVX2 backend is selected and executed, rather than only
@@ -81,11 +82,11 @@ paired measurements, without adding a workload heuristic or user-visible mode.
 
 ## 5. Run the final CI target matrix
 
-Status: in progress. The matrix now exercises native AArch64 NEON on macOS,
-native x86-64 AVX2 on Linux, and x86-64 scalar dispatch under a QEMU Nehalem
-CPU model. It separately tests default, `with_serde`, `sort_unstable`, and
-all-feature configurations, and compiles scalar-only i686, PowerPC64LE, and
-Wasm targets. The matrix must pass on GitHub before this gate is complete.
+Status: complete. On 2026-07-28, the final GitHub matrix passed native AArch64
+NEON on macOS, native x86-64 AVX2 on Linux, and the complete x86-64 scalar test
+suite under a QEMU Nehalem CPU model. It passed Rust 1.59 and current stable,
+default, `with_serde`, `sort_unstable`, and all-feature configurations, plus
+scalar-only i686, PowerPC64LE, and Wasm compilation.
 
 - Test AArch64 NEON, x86-64 AVX2, and x86-64 scalar execution.
 - Compile and test the scalar fallback on other supported targets.
