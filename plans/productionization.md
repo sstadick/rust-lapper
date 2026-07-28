@@ -81,6 +81,12 @@ paired measurements, without adding a workload heuristic or user-visible mode.
 
 ## 5. Run the final CI target matrix
 
+Status: in progress. The matrix now exercises native AArch64 NEON on macOS,
+native x86-64 AVX2 on Linux, and x86-64 scalar dispatch under a QEMU Nehalem
+CPU model. It separately tests default, `with_serde`, `sort_unstable`, and
+all-feature configurations, and compiles scalar-only i686, PowerPC64LE, and
+Wasm targets. The matrix must pass on GitHub before this gate is complete.
+
 - Test AArch64 NEON, x86-64 AVX2, and x86-64 scalar execution.
 - Compile and test the scalar fallback on other supported targets.
 - Cover default features, `with_serde`, and `sort_unstable`.

@@ -133,7 +133,10 @@ mod dispatch_tests {
         let backend = detect_backend();
 
         #[cfg(target_arch = "aarch64")]
-        assert!(matches!(backend, MaskBackend::Neon));
+        {
+            assert!(matches!(backend, MaskBackend::Neon));
+            eprintln!("runtime backend: NEON");
+        }
 
         #[cfg(target_arch = "x86_64")]
         if std::is_x86_feature_detected!("avx2") {

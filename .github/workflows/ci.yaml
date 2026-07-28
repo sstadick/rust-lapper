@@ -1,6 +1,9 @@
 name: ci
 
-on: [ push, pull_request ]
+on:
+  push:
+    branches: [ master ]
+  pull_request:
 
 env:
   CARGO_TERM_COLOR: always
@@ -37,11 +40,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install pinned toolchain
+      - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.95.0
+          toolchain: stable
           override: true
 
       - name: Cache dependencies
@@ -51,7 +54,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --all-features
+          args: --all-targets --all-features --locked
 
   lints:
     name: Lints
@@ -60,11 +63,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install pinned toolchain
+      - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.95.0
+          toolchain: stable
           override: true
           components: rustfmt, clippy
 
@@ -81,7 +84,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --all-features -- -D warnings
+          args: --all-targets --all-features --locked -- -D warnings
 
   native-avx2:
     name: Native AVX2
@@ -90,11 +93,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install pinned toolchain
+      - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.95.0
+          toolchain: stable
           override: true
 
       - name: Cache dependencies
@@ -107,28 +110,108 @@ jobs:
 
       - name: Exercise runtime dispatch and AVX2 masks
         run: |
-          cargo test --all-features simd::dispatch_tests::selected_backend_matches_the_host -- --exact --nocapture
-          cargo test --all-features simd::avx2::tests::primitive_masks_match_scalar_when_avx2_is_available -- --exact --nocapture
+          cargo test --all-features --locked simd::dispatch_tests::selected_backend_matches_the_host -- --exact --nocapture
+          cargo test --all-features --locked simd::avx2::tests::primitive_masks_match_scalar_when_avx2_is_available -- --exact --nocapture
 
-  test:
-    name: Test Suite
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ ubuntu-latest, macOS-latest, windows-latest ]
+  scalar-x86:
+    name: Scalar x86-64
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install pinned toolchain
+      - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.95.0
+          toolchain: stable
+          override: true
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v1
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes qemu-user
+          qemu-x86_64 --version
+
+      - name: Exercise scalar runtime dispatch without AVX2
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: qemu-x86_64 -cpu Nehalem
+        run: |
+          cargo test --all-features --locked --target x86_64-unknown-linux-gnu simd::dispatch_tests::selected_backend_matches_the_host -- --exact --nocapture
+          cargo test --all-features --locked --target x86_64-unknown-linux-gnu
+
+  scalar-targets:
+    name: Scalar fallback targets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          target: i686-unknown-linux-gnu, powerpc64le-unknown-linux-gnu, wasm32-unknown-unknown
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v1
+
+      - name: Check scalar-only architectures
+        run: |
+          cargo check --lib --all-features --locked --target i686-unknown-linux-gnu
+          cargo check --lib --all-features --locked --target powerpc64le-unknown-linux-gnu
+          cargo check --lib --all-features --locked --target wasm32-unknown-unknown
+
+  test:
+    name: Test Suite (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - name: Linux, default features
+            os: ubuntu-latest
+            features: ""
+          - name: Linux, serde
+            os: ubuntu-latest
+            features: --features with_serde
+          - name: Linux, unstable sort
+            os: ubuntu-latest
+            features: --features sort_unstable
+          - name: Linux, all features
+            os: ubuntu-latest
+            features: --all-features
+          - name: macOS ARM64, all features
+            os: macos-15
+            features: --all-features
+            neon: true
+          - name: Windows, all features
+            os: windows-latest
+            features: --all-features
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
           override: true
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v1
 
       - name: Run tests
-        run: cargo test --verbose --all-features
+        run: cargo test --verbose --locked ${{ matrix.features }}
+
+      - name: Verify native NEON dispatch
+        if: matrix.neon
+        run: |
+          test "$(uname -m)" = arm64
+          cargo test --all-features --locked simd::dispatch_tests::selected_backend_matches_the_host -- --exact --nocapture
+          cargo test --all-features --locked --test portable_index every_primitive_integer_type_matches_forward_brute_force -- --exact
