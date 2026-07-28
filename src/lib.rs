@@ -311,7 +311,9 @@ where
 
         self.block_max_ends.clear();
         self.block_min_ends.clear();
-        let block_count = self.intervals.len().div_ceil(INDEX_BLOCK_SIZE);
+        let interval_count = self.intervals.len();
+        let block_count =
+            interval_count / INDEX_BLOCK_SIZE + usize::from(interval_count % INDEX_BLOCK_SIZE != 0);
         self.block_max_ends.reserve(block_count);
         self.block_min_ends.reserve(block_count);
         for block in self.intervals.chunks(INDEX_BLOCK_SIZE) {
@@ -329,10 +331,9 @@ where
         self.block_index.resize(block_count, block_count);
         let mut stack = Vec::<usize>::new();
         for block in (0..block_count).rev() {
-            while stack
-                .last()
-                .is_some_and(|next| self.block_max_ends[*next] <= self.block_max_ends[block])
-            {
+            while stack.last().map_or(false, |&next| {
+                self.block_max_ends[next] <= self.block_max_ends[block]
+            }) {
                 stack.pop();
             }
             self.block_index[block] = stack.last().copied().unwrap_or(block_count);

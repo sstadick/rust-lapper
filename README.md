@@ -27,6 +27,11 @@ type, and should be about as fast as it is possible to be on any
 dataset. It is an implementation of the [BITS
 algorithm](https://academic.oup.com/bioinformatics/article/29/1/1/273289)
 
+## Minimum Supported Rust Version
+
+`rust-lapper` supports Rust 1.59 and newer. Rust 1.59 is the first stable
+release that provides the AArch64 intrinsics used by the NEON query backend.
+
 ## Serde Support
 
 `rust-lapper` supports serialization with serde for `Lapper` and `Interval` objects:

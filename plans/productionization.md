@@ -7,6 +7,12 @@ iteration order, exact overlap semantics, and always-on query algorithm.
 
 ## 1. Validate AVX2 on real Intel/AMD hardware
 
+Status: in progress. On 2026-07-28, GitHub's native x86-64 runner reported an
+AMD EPYC 7763 with AVX2. Runtime dispatch selected AVX2 and every signed and
+unsigned AVX2 mask matched the scalar result. Rosetta separately exercised the
+x86-64 scalar selection. Native three-dataset performance measurements and a
+physical non-AVX2 x86 host remain outstanding.
+
 - Run the complete test suite on native x86-64 with AVX2 available.
 - Verify that the AVX2 backend is selected and executed, rather than only
   inspecting forced-target assembly.
@@ -19,6 +25,11 @@ Pass condition: native AVX2 and non-AVX2 paths are correct, and the native AVX2
 performance record contains no unexplained regression.
 
 ## 2. Decide and document the effective MSRV
+
+Status: complete. The declared MSRV is Rust 1.59.0. The locked all-feature
+library builds on 1.59.0, while 1.58.1 fails because its AArch64 `std::arch`
+intrinsics are still unstable. Rust-lapper 1.3.0 had no declared MSRV and its
+locked all-feature library still builds on Rust 1.56.1.
 
 - Determine the oldest compiler supported by rust-lapper 1.3.0.
 - Identify the oldest compiler accepted by the worked implementation and its

@@ -6,6 +6,30 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  msrv:
+    name: MSRV 1.59
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install MSRV toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: 1.59.0
+          override: true
+          target: aarch64-unknown-linux-gnu
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v1
+
+      - name: Test on the MSRV
+        run: cargo test --all-features --locked
+
+      - name: Check AArch64 NEON on the MSRV
+        run: cargo check --lib --all-features --locked --target aarch64-unknown-linux-gnu
+
   check:
     name: Check
     runs-on: ubuntu-latest
