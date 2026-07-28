@@ -124,6 +124,31 @@ fn scalar_mask<I: PrimInt>(starts: &[I], stops: &[I], query_start: I, query_stop
     mask
 }
 
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+
+    #[test]
+    fn selected_backend_matches_the_host() {
+        let backend = detect_backend();
+
+        #[cfg(target_arch = "aarch64")]
+        assert!(matches!(backend, MaskBackend::Neon));
+
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx2") {
+            assert!(matches!(backend, MaskBackend::Avx2));
+            eprintln!("runtime backend: AVX2");
+        } else {
+            assert!(matches!(backend, MaskBackend::Scalar));
+            eprintln!("runtime backend: scalar");
+        }
+
+        #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+        assert!(matches!(backend, MaskBackend::Scalar));
+    }
+}
+
 #[cfg(target_arch = "aarch64")]
 mod neon {
     use std::arch::aarch64::*;
