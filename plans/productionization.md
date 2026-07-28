@@ -1,0 +1,63 @@
+# Portable SIMD index production plan
+
+The implementation on `worked/portable-simd-index` is feature-complete as an
+experimental release candidate. Productionization is limited to the five gates
+below; changes should preserve the existing public API, forward borrowed
+iteration order, exact overlap semantics, and always-on query algorithm.
+
+## 1. Validate AVX2 on real Intel/AMD hardware
+
+- Run the complete test suite on native x86-64 with AVX2 available.
+- Verify that the AVX2 backend is selected and executed, rather than only
+  inspecting forced-target assembly.
+- Run the three retained datasets against rust-lapper 1.3.0, the worked Lapper,
+  and the pinned Rust competitors.
+- Test an x86-64 build or host without AVX2 and confirm the scalar fallback.
+- Record CPU, compiler, build flags, raw samples, medians, and overlap counts.
+
+Pass condition: native AVX2 and non-AVX2 paths are correct, and the native AVX2
+performance record contains no unexplained regression.
+
+## 2. Decide and document the effective MSRV
+
+- Determine the oldest compiler supported by rust-lapper 1.3.0.
+- Identify the oldest compiler accepted by the worked implementation and its
+  dependencies.
+- Either retain the existing effective MSRV or choose a deliberate new one.
+- Add the decision to package metadata, CI, and release documentation.
+
+Pass condition: the declared MSRV builds and tests the supported feature set,
+and any increase is intentional and documented.
+
+## 3. Resolve the `I: 'static` API-bound addition
+
+- Measure the public API difference from rust-lapper 1.3.0.
+- Determine whether safe primitive-type SIMD dispatch can avoid `TypeId` and
+  the corresponding `I: 'static` bound without restricting custom `PrimInt`
+  implementations.
+- If it cannot be removed without a larger compatibility or performance cost,
+  document and test the bound as an intentional compatibility decision.
+
+Pass condition: the bound is either eliminated or explicitly accepted with its
+actual user impact documented.
+
+## 4. Measure cached backend and type selection
+
+- Compare the current per-iterator backend detection and per-mask type
+  selection with selection cached at `Lapper` construction.
+- Measure construction, query, and total time on all three retained datasets.
+- Reject function-pointer or cached-dispatch designs that are slower, more
+  fragile, or materially more complex without a demonstrated benefit.
+
+Pass condition: retain the fastest defensible dispatch arrangement based on
+paired measurements, without adding a workload heuristic or user-visible mode.
+
+## 5. Run the final CI target matrix
+
+- Test AArch64 NEON, x86-64 AVX2, and x86-64 scalar execution.
+- Compile and test the scalar fallback on other supported targets.
+- Cover default features, `with_serde`, and `sort_unstable`.
+- Include the declared MSRV and current stable Rust.
+
+Pass condition: every supported target and feature combination is green, with
+native execution for the SIMD backends claimed by the release.
