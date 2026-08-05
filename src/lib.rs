@@ -1,50 +1,28 @@
-//! This module provides a simple data-structure for fast interval searches.
+//! A compact data structure for fast interval overlap queries.
+//!
 //! ## Features
-//! - Extremely fast on most genomic datasets. (3-4x faster than other methods)
-//! - Extremely fast on in order queries. (10x faster than other methods)
-//! - Extremely fast intersections count method based on the
+//!
+//! - Lazy, borrowed `find()` and `seek()` iterators in ascending start order.
+//! - A fixed 32-interval block index that handles both ordinary data and long
+//!   intervals that engulf many shorter intervals.
+//! - NEON mixed-block masks on AArch64, runtime-detected AVX2 on x86-64, and an
+//!   exact scalar fallback on other targets and coordinate types.
+//! - An overlap-count method based on the
 //!   [BITS](https://arxiv.org/pdf/1208.3407.pdf) algorithm
-//! - Parallel friendly. Queries are on an immutable structure, even for seek
-//! - Consumer / Adapter paradigm, Iterators are returned and serve as the main API for interacting
-//!   with the lapper
+//! - Immutable, parallel-friendly queries. `seek()` keeps its query cursor
+//!   outside the shared structure.
 //!
-//! ## Details:
+//! ## Range semantics
 //!
-//! ```text
-//!       0  1  2  3  4  5  6  7  8  9  10 11
-//! (0,10]X  X  X  X  X  X  X  X  X  X
-//! (2,5]       X  X  X
-//! (3,8]          X  X  X  X  X
-//! (3,8]          X  X  X  X  X
-//! (3,8]          X  X  X  X  X
-//! (3,8]          X  X  X  X  X
-//! (5,9]                X  X  X  X
-//! (8,11]                        X  X  X
+//! Stored intervals and query ranges are half-open: `[start, stop)`. Two ranges
+//! overlap exactly when `interval.start < query.stop` and
+//! `interval.stop > query.start`. Adjacent ranges such as `[0, 10)` and
+//! `[10, 20)` do not overlap.
 //!
-//! Query: (8, 11]
-//! Answer: ((0,10], (5,9], (8,11])
-//! ```
-//!
-//! Most interaction with this crate will be through the [`Lapper`](struct.Lapper.html) struct
-//! The main methods are [`find`](struct.Lapper.html#method.find),
-//! [`seek`](struct.Lapper.html#method.seek), and [`count`](struct.Lapper.html#method.count)
-//! where both `seek` and `count` are special cases allowing for very fast queries in certain scenarios.
-//!
-//! The overlap function for this assumes a zero based genomic coordinate system. So [start, stop)
-//! is not inclusive of the stop position for neither the queries, nor the Intervals.
-//!
-//! Lapper does not use an interval tree, instead, it operates on the assumtion that most intervals are
-//! of similar length; or, more exactly, that the longest interval in the set is not long compred to
-//! the average distance between intervals.
-//!
-//! For cases where this holds true (as it often does with genomic data), we can sort by start and
-//! use binary search on the starts, accounting for the length of the longest interval. The advantage
-//! of this approach is simplicity of implementation and speed. In realistic tests queries returning
-//! the overlapping intervals are 1000 times faster than brute force and queries that merely check
-//! for the overlaps are > 5000 times faster.
-//!
-//! When this is not the case, if possible in your scenario, use merge_overlaps first, and then use
-//! `find` or `seek`. The `count` method will be fast in all scenarios.
+//! Most interaction with this crate is through [`Lapper`]. Use
+//! [`Lapper::find`] for independent queries, [`Lapper::seek`] for queries
+//! arriving in sorted start order, and [`Lapper::count`] when only the number
+//! of overlaps is needed.
 //!
 //! # Examples
 //!
@@ -103,15 +81,22 @@ where
     pub val: T,
 }
 
-/// Primary object of the library. The public intervals holds all the intervals and can be used for
-/// iterating / pulling values out of the tree.
+/// Primary interval collection and query index.
+///
+/// The public interval vector is the canonical storage and can be read or used
+/// to mutate payload values. Coordinate or structural changes must use
+/// [`Lapper::insert`] or [`Lapper::merge_overlaps`] so the private query index
+/// is rebuilt.
 #[derive(Debug, Clone)]
 pub struct Lapper<I, T>
 where
     I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
-    /// List of intervals
+    /// Intervals in ascending start order.
+    ///
+    /// Directly changing coordinates or vector length leaves the private query
+    /// index stale. Payload-only changes are safe.
     pub intervals: Vec<Interval<I, T>>,
     /// Sorted list of start positions,
     starts: Vec<I>,
@@ -682,7 +667,8 @@ where
         }
     }
 
-    /// Count all intervals that overlap start .. stop. This performs two binary search in order to
+    /// Count all intervals that overlap the half-open query `[start, stop)`.
+    /// This performs two binary searches in order to
     /// find all the excluded elements, and then deduces the intersection from there. See
     /// [BITS](https://arxiv.org/pdf/1208.3407.pdf) for more details.
     /// ```
@@ -703,7 +689,7 @@ where
         len - first - num_cant_after
     }
 
-    /// Find all intervals that overlap start .. stop
+    /// Find all intervals that overlap the half-open query `[start, stop)`.
     /// ```
     /// use rust_lapper::{Lapper, Interval};
     /// let lapper = Lapper::new((0..100).step_by(5)
@@ -730,7 +716,8 @@ where
         }
     }
 
-    /// Find all intevals that overlap start .. stop. This method will work when queries
+    /// Find all intervals that overlap the half-open query `[start, stop)`.
+    /// This method will work when queries
     /// to this lapper are in sorted (start) order. It uses a linear search from the last query
     /// instead of a binary search. A reference to a cursor must be passed in. This reference will
     /// be modified and should be reused in the next query. This allows seek to not need to make
@@ -1553,8 +1540,19 @@ mod tests {
     }
 
     #[cfg(feature = "with_serde")]
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct LegacyLapper {
+        intervals: Vec<Iv>,
+        starts: Vec<usize>,
+        stops: Vec<usize>,
+        max_len: usize,
+        cov: Option<usize>,
+        overlaps_merged: bool,
+    }
+
+    #[cfg(feature = "with_serde")]
     #[test]
-    fn serde_test() {
+    fn serde_keeps_the_v1_six_field_representation() {
         let data = vec![
             Iv{start:25264912, stop: 25264986, val: 0},
             Iv{start:27273024, stop: 27273065	, val: 0},
@@ -1566,14 +1564,26 @@ mod tests {
         ];
         let lapper = Lapper::new(data);
 
-        let serialized = bincode::serialize(&lapper).unwrap();
-        let deserialzed: Lapper<usize, u32> = bincode::deserialize(&serialized).unwrap();
+        let legacy = LegacyLapper {
+            intervals: lapper.intervals.clone(),
+            starts: lapper.starts.clone(),
+            stops: lapper.stops.clone(),
+            max_len: lapper.max_len,
+            cov: lapper.cov,
+            overlaps_merged: lapper.overlaps_merged,
+        };
+        let legacy_bytes = bincode::serialize(&legacy).unwrap();
+        let deserialized: Lapper<usize, u32> = bincode::deserialize(&legacy_bytes).unwrap();
+        let current_bytes = bincode::serialize(&deserialized).unwrap();
+        assert_eq!(current_bytes, legacy_bytes);
+        let legacy_again: LegacyLapper = bincode::deserialize(&current_bytes).unwrap();
+        assert_eq!(legacy_again, legacy);
 
-        let found = deserialzed.find(28974798, 33141355).collect::<Vec<&Iv>>();
+        let found = deserialized.find(28974798, 33141355).collect::<Vec<&Iv>>();
         assert_eq!(found, vec![
             &Iv{start:28866309, stop: 33141404	, val: 0},
         ]);
-        assert_eq!(deserialzed.count(28974798, 33141355), 1);
+        assert_eq!(deserialized.count(28974798, 33141355), 1);
     }
 
 }

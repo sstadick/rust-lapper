@@ -260,24 +260,31 @@ Handwritten assembly was also rejected. LLVM already emits the intended AArch64
 assembly would add review and register-allocation risk without removing a known
 instruction in these cores.
 
-The detailed audit is in the bakeoff's `ASSEMBLY_BOUNDS_AUDIT.md`.
+The detailed audit is in the bakeoff's
+[`ASSEMBLY_BOUNDS_AUDIT.md`](https://github.com/sstadick/lapper_bakeoff/blob/main/ASSEMBLY_BOUNDS_AUDIT.md).
 
 ## Correctness and portability checks
 
-The branch passes:
+On 2026-07-28, the designated native x86 benchmark host, an AMD Ryzen 9 3950X,
+passed:
 
 ```text
-native cargo test --all-features
-native cargo clippy --all-targets --all-features -- -D warnings
-x86_64-apple-darwin cargo test --all-features --test portable_index
-x86_64-apple-darwin cargo check --all-features
-wasm32-wasip1 cargo clippy --lib --all-features -- -D warnings
+cargo test --all-features --locked
+cargo clippy --all-targets --all-features --locked -- -D warnings
 ```
+
+Runtime dispatch selected AVX2, and direct calls to every signed and unsigned
+primitive AVX2 mask matched the scalar result. The final GitHub matrix also
+passed native AVX2 execution on an AMD EPYC 7763, native AArch64 NEON execution
+on macOS, and the complete x86-64 scalar suite under a QEMU Nehalem CPU model.
+It covers Rust 1.59 and current stable, every feature configuration, Windows,
+and scalar-only compilation for i686, PowerPC64LE, and Wasm.
 
 Coverage includes:
 
 - randomized `find()`, `seek()`, and `count()` against brute force;
-- exact reference order for all ten primitive integer types;
+- exact reference order for all primitive integer coordinate types, including
+  the scalar `u128` and `i128` fallbacks;
 - negative intervals and a query at the signed minimum;
 - insert and merge rebuilding across more than four blocks;
 - serde round trips with derived metadata reconstruction;
@@ -286,15 +293,20 @@ Coverage includes:
 - exhaustive AVX2 `u16` movemask compaction; and
 - forced calls to each AVX2 primitive function when AVX2 is available.
 
-The x86-64 test executable ran under Rosetta on the Apple host. Rosetta did not
-advertise AVX2, so the backend's instructions were verified in forced-Haswell
-assembly rather than performance-tested or executed there. Native Intel/AMD CI
-remains required before merging an x86 performance claim.
+Rosetta provided the initial x86-64 scalar-dispatch check because it did not
+advertise AVX2. Native AMD CI and the Ryzen host now supersede that limitation
+for AVX2 correctness. The Ryzen host also completed the three retained
+performance cases; those results follow the original AArch64 record below.
 
 ## Performance record
 
-All times below are medians in milliseconds. The five-library worked run used
-the normal `find()` API and native Apple M3 compilation.
+All times below are medians in milliseconds. Totals combine independently
+reported build and query medians.
+
+### Apple M3 AArch64
+
+The five-library worked run used the normal `find()` API and native Apple M3
+compilation.
 
 | Case | SuperIntervals | Worked Lapper | COITrees | rust-bio IITree | rust-bio AVL |
 |---|---:|---:|---:|---:|---:|
@@ -302,9 +314,8 @@ the normal `find()` API and native Apple M3 compilation.
 | `7-3` | 68.881 | **66.385** | 89.782 | 149.975 | 344.913 |
 | `8-7` | **550.372** | 588.766 | 834.219 | 1259.076 | 2140.363 |
 
-Those totals combine independently reported build and query medians. Direct
-alternating Lapper/SuperIntervals process pairs give the more reliable close-call
-interpretation:
+Direct alternating Lapper/SuperIntervals process pairs give the more reliable
+close-call interpretation:
 
 | Case | Worked Lapper versus SuperIntervals total | Pair wins |
 |---|---:|---:|
@@ -328,8 +339,42 @@ unchecked `u32` branch in paired query trials:
 For orientation, the original v1.3.0 query medians were 5.648, 5049.867, and
 884.546 ms on `1-2`, `7-3`, and `8-7`. Those original-versus-worked values came
 from separate controlled runs and should not be read as paired microbenchmark
-percentages. Raw files and methods live under the bakeoff's
-`results/forward-simd-2026-07-18/` directory.
+percentages. Raw files and methods live in the bakeoff's
+[`results/forward-simd-2026-07-18`](https://github.com/sstadick/lapper_bakeoff/tree/main/results/forward-simd-2026-07-18)
+directory.
+
+### AMD Ryzen 9 3950X AVX2
+
+The native x86-64 run used rustc 1.95.0 and
+`RUSTFLAGS="-C target-cpu=native"`. Runtime dispatch selected AVX2, and the
+direct primitive mask tests matched the scalar implementation. The worked
+binary and all four pinned competitors returned identical overlap counts.
+
+| Case | SuperIntervals | Worked Lapper | COITrees | rust-bio IITree | rust-bio AVL |
+|---|---:|---:|---:|---:|---:|
+| `1-2` | 11.968 | **8.600** | 13.886 | 18.150 | 68.153 |
+| `7-3` | **90.807** | 97.084 | 136.789 | 221.536 | 539.133 |
+| `8-7` | **685.273** | 779.564 | 1101.420 | 1783.182 | 3302.566 |
+
+Worked Lapper ranked first on `1-2` and second on the other two cases. Relative
+to SuperIntervals, its three-repeat totals were 28.14% faster, 6.91% slower, and
+13.76% slower. Alternating paired totals give the more reliable direct changes:
+19.70% faster, 5.38% slower, and 12.67% slower.
+
+The same harness also measured rust-lapper 1.3.0 at `c545d40`:
+
+| Case | Original v1.3.0 | Worked Lapper | Worked total change |
+|---|---:|---:|---:|
+| `1-2` | 13.715 | 8.600 | **-37.30%** |
+| `7-3` | 8756.427 | 97.084 | **-98.89%** |
+| `8-7` | 1192.626 | 779.564 | **-34.64%** |
+
+The pathological `7-3` total improved by 90.2 times. No article case regressed
+against the release baseline. The complete method, compiler correction,
+alternating comparisons, build/query medians, logs, and raw TSV files are
+retained in the bakeoff's
+[`results/avx2-2026-07-28`](https://github.com/sstadick/lapper_bakeoff/tree/main/results/avx2-2026-07-28)
+directory.
 
 ## Why this is not AIList or another renamed index
 
@@ -383,12 +428,13 @@ answer for the ARM portion: it excludes generic dispatch, AVX2, mutation
 rebuilding, and unchecked indexing so those operations can be learned once
 without production scaffolding.
 
-## Remaining decisions
+## Post-release opportunities
 
-- Measure AVX2 on native Intel and AMD hardware.
+- Physical non-AVX2 x86 and Intel-branded measurements may add hardware-diverse
+  performance data, but are not v2 release requirements. QEMU already executes
+  the scalar x86-64 path and native AMD hosts execute the AVX2 path.
 - Add native big-endian and non-Apple AArch64 CI if those are support targets.
 - Measure memory/cache behavior across coordinate and payload widths.
-- Decide whether the theoretical new `I: 'static` constraint is acceptable.
 - Treat SVE2 and AVX-512 as separate CPU backends only after native evidence.
 - Preserve safe result indexing unless a new measurement justifies expanding the
   unsafe proof.

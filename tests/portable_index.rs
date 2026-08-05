@@ -43,40 +43,44 @@ fn exercise_unsigned<I>()
 where
     I: PrimInt + Ord + Clone + Send + Sync + 'static,
 {
-    let intervals = (0..96)
-        .map(|value| {
-            let raw_start = (value * 2) % 181;
-            let raw_stop = raw_start + 1 + (value * 7) % 19;
-            Interval {
-                start: I::from(raw_start).unwrap(),
-                stop: I::from(raw_stop).unwrap(),
-                val: value,
-            }
-        })
-        .collect();
-    assert_queries_match(&Lapper::new(intervals), 0, 190);
+    for interval_count in 0..=65 {
+        let intervals = (0..interval_count)
+            .map(|value| {
+                let raw_start = (value * 2) % 181;
+                let raw_stop = raw_start + 1 + (value * 7) % 19;
+                Interval {
+                    start: I::from(raw_start).unwrap(),
+                    stop: I::from(raw_stop).unwrap(),
+                    val: value,
+                }
+            })
+            .collect();
+        assert_queries_match(&Lapper::new(intervals), 0, 190);
+    }
 }
 
 fn exercise_signed<I>()
 where
     I: PrimInt + Ord + Clone + Send + Sync + 'static,
 {
-    let intervals = (0..96)
-        .map(|value| {
-            let raw_start = (value * 2) as i64 % 121 - 60;
-            let raw_stop = raw_start + 1 + (value * 7) as i64 % 19;
-            Interval {
-                start: I::from(raw_start).unwrap(),
-                stop: I::from(raw_stop).unwrap(),
-                val: value,
-            }
-        })
-        .collect();
-    assert_queries_match(&Lapper::new(intervals), -70, 70);
+    for interval_count in 0..=65 {
+        let intervals = (0..interval_count)
+            .map(|value| {
+                let raw_start = (value * 2) as i64 % 121 - 60;
+                let raw_stop = raw_start + 1 + (value * 7) as i64 % 19;
+                Interval {
+                    start: I::from(raw_start).unwrap(),
+                    stop: I::from(raw_stop).unwrap(),
+                    val: value,
+                }
+            })
+            .collect();
+        assert_queries_match(&Lapper::new(intervals), -70, 70);
+    }
 }
 
 #[test]
-fn every_primitive_integer_type_matches_forward_brute_force() {
+fn every_primitive_integer_type_and_block_tail_matches_forward_brute_force() {
     exercise_unsigned::<u8>();
     exercise_unsigned::<u16>();
     exercise_unsigned::<u32>();

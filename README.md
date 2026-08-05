@@ -9,34 +9,40 @@
 [Documentation](https://docs.rs/rust-lapper)
 [Crates.io](https://crates.io/crates/rust-lapper)
 
-This is a rust port of Brent Pendersen's
-[nim-lapper](https://github.com/brentp/nim-lapper). It has a few notable
-differences, mostly that the find and seek methods both return
-iterators, so all adaptor methods may be used normally.
+This is a Rust port of Brent Pedersen's
+[nim-lapper](https://github.com/brentp/nim-lapper). `find()` and `seek()` return
+lazy borrowed iterators in ascending start order, so normal iterator adaptors
+work without collecting results first.
 
-This crate works well for most interval data that does not include very long
-intervals that engulf a majority of other intervals. It is still fairly
-comparable to other methods. If you absolutely need time guarantees in the
-worst case, see [COItres](https://github.com/dcjones/coitrees) and [IITree](https://docs.rs/bio/0.32.0/bio/data_structures/interval_tree/struct.ArrayBackedIntervalTree.html).
+All stored intervals and query ranges use half-open `[start, stop)` semantics.
+`Lapper` keeps its intervals sorted by start and builds a fixed 32-interval
+block index that can skip regions proven not to overlap. Mixed blocks use NEON
+on AArch64, runtime-detected AVX2 on x86-64, and an exact scalar fallback
+elsewhere. The same algorithm handles both ordinary and pathological datasets
+with long intervals that engulf many shorter intervals.
 
-However, on more typical datasets, this crate is between 4-10x faster
-than other interval overlap methods.
-
-It should also be noted that the `count` method is agnostic to data
-type, and should be about as fast as it is possible to be on any
-dataset. It is an implementation of the [BITS
-algorithm](https://academic.oup.com/bioinformatics/article/29/1/1/273289)
+The `count()` method uses the
+[BITS algorithm](https://academic.oup.com/bioinformatics/article/29/1/1/273289)
+to count overlaps with two binary searches.
 
 ## Minimum Supported Rust Version
 
-`rust-lapper` supports Rust 1.59 and newer. Rust 1.59 is the first stable
+rust-lapper 2 supports Rust 1.59 and newer. Rust 1.59 is the first stable
 release that provides the AArch64 intrinsics used by the NEON query backend.
 
 Query coordinates must be `'static` so private dispatch code can use `TypeId`
 before reinterpreting primitive integer slices for SIMD. This includes every
 primitive integer and ordinary owned custom numeric type; it does not require a
 `Lapper` value to live for the entire program. Non-primitive `PrimInt` types use
-the scalar mask implementation.
+the scalar mask implementation. The bound is the API-breaking change that makes
+this a major release.
+
+## Mutation
+
+Use `insert()` and `merge_overlaps()` for coordinate or structural changes so
+the private query index is rebuilt. Directly changing `Lapper::intervals`
+coordinates or length leaves derived metadata stale; changing payload values is
+safe.
 
 ## Serde Support
 
@@ -44,63 +50,22 @@ the scalar mask implementation.
 
 ```toml
 [dependencies]
-rust-lapper = { version = "*", features = ["with_serde"] }
+rust-lapper = { version = "2", features = ["with_serde"] }
 ```
 
 See `examples/serde.rs` for a brief example.
 
 ## Benchmarks
 
-Benchmarking interval tree-ish datastructures is hard
-Please see the
-[interval_bakeoff](https://github.com/sstadick/interval_bakeoff) project
-for details on how the benchmarks were run... It's not fully baked yet
-though, and is finiky to run.
+The retained v2 release measurements, raw samples, compiler flags, and pinned
+competitor revisions live in
+[lapper_bakeoff](https://github.com/sstadick/lapper_bakeoff/tree/main/results/avx2-2026-07-28).
+On an AMD Ryzen 9 3950X with AVX2, the new implementation improved total time
+over rust-lapper 1.3.0 by 37.30%, 98.89%, and 34.64% on the three retained
+article cases. All implementations returned identical overlap counts.
 
-Command to run:
-
-```
-./target/release/interval_bakeoff fake -a -l RustLapper -l
-RustBio -l NestedInterval -n50000 -u100000
-
-# This equates to the following params:
-# num_intervals	50000
-# universe_size	100000
-# min_interval_size	500
-# max_interval_size	80000
-# add_large_span	true (universe spanning)
-```
-
-Set A / b Creation Times
-
-| crate/method     | A time   | B time   |
-| ---------------- | -------- | -------- |
-| rust_lapper      | 15.625ms | 31.25ms  |
-| nested_intervals | 15.625ms | 15.625ms |
-| bio              | 15.625ms | 31.25ms  |
-
-100% hit rate (A vs A)
-
-| crate/method                       | mean time  | intersection |
-| ---------------------------------- | ---------- | ------------ |
-| rust_lapper/find                   | 4.78125s   | 1469068763   |
-| rust_lapper/count                  | 15.625ms   | 1469068763   |
-| nested_intervals/query_overlapping | 157.4375s  | 1469068763   |
-| bio/find                           | 33.296875s | 1469068763   |
-
-
-Sub 100% hit rate (A vs B)
-
-| crate/method                       | mean time  | intersection |
-| ---------------------------------- | ---------- | ------------ |
-| rust_lapper/find                   | 531.25ms   | 176488436    |
-| rust_lapper/count                  | 15.625ms   | 176488436    |
-| nested_intervals/query_overlapping | 11.109375s | 196090092    |
-| bio/find                           | 4.3125s    | 176488436    |
-
-[nested_intervals](https://docs.rs/nested_intervals/0.2.0/nested_intervals/)
-[rust-bio](https://docs.rs/bio/0.28.2/bio/)
-*Note that rust-bio has a new interval tree structure which should be faster than what is shown here*
+Benchmark results are workload- and hardware-specific; use the linked harness
+and raw data when making comparisons.
 
 ## Example
 
@@ -195,8 +160,8 @@ fn main() {
         ]
     );
 
-    // Merge overlaping regions within the lapper to simplifiy and speed up quries that only depend
-    // on 'any
+    // Merge overlapping regions to simplify queries that only depend on whether
+    // any interval overlaps.
     lapper.merge_overlaps();
     assert_eq!(
         lapper.find(11, 15).collect::<Vec<&Iv>>(),
@@ -240,10 +205,13 @@ fn main() {
 
 ## Release Notes
 
+- `2.0.0`: Replace the longest-interval scan with a portable SIMD block index,
+  add signed coordinates, declare Rust 1.59 as the MSRV, and accept the
+  `I: 'static` coordinate bound.
 - `1.3.0`: Add the `sort_unstable` feature flag for allocation-sensitive sorting thanks to @jameslkingsley.
 - `1.1.0`: Added insert functionality thanks to @zaporter
-- `0.4.0`: Addition of the BITS count algorithm.
-- `0.4.2`: Bugfix in to update starts/stops vectors when overlaps merged
-- `0.4.3`: Remove leftover print statement
-- `0.5.0`: Make Interval start/stop generic
 - `1.0.0`: Add serde support via the `with_serde` feature flag
+- `0.5.0`: Make Interval start/stop generic
+- `0.4.3`: Remove leftover print statement
+- `0.4.2`: Bugfix in to update starts/stops vectors when overlaps merged
+- `0.4.0`: Addition of the BITS count algorithm.

@@ -1,29 +1,49 @@
 # Portable SIMD index production plan
 
-The implementation on `worked/portable-simd-index` is feature-complete as an
-experimental release candidate. Productionization is limited to the five gates
-below; changes should preserve the existing public API, forward borrowed
-iteration order, exact overlap semantics, and always-on query algorithm.
+The implementation on `worked/portable-simd-index` is feature-complete for
+rust-lapper 2.0. Productionization is limited to the five gates below; changes
+preserve forward borrowed iteration order, exact overlap semantics, and the
+always-on query algorithm. The accepted `I: 'static` bound is the intentional
+major-version API change.
 
-## 1. Validate AVX2 on real Intel/AMD hardware
+## 1. Validate AVX2 on native x86-64 hardware
 
-Status: in progress. On 2026-07-28, GitHub's native x86-64 runner reported an
-AMD EPYC 7763 with AVX2. Runtime dispatch selected AVX2 and every signed and
-unsigned AVX2 mask matched the scalar result. Rosetta separately exercised the
-x86-64 scalar selection, and the final CI matrix ran the complete test suite
-under a QEMU Nehalem CPU model without AVX2. Native three-dataset performance
-measurements and a physical non-AVX2 x86 host remain outstanding.
+Status: complete. On 2026-07-28, GitHub's native x86-64 runner reported an AMD
+EPYC 7763 with AVX2. Runtime dispatch selected AVX2 and every signed and unsigned
+AVX2 mask matched the scalar result. The designated native benchmark host is an
+AMD Ryzen 9 3950X. Its locked all-feature suite passes, runtime dispatch selects
+AVX2, and the direct primitive mask suite matches the scalar implementation.
+Rosetta separately exercised x86-64 scalar selection, and the final CI matrix
+ran the complete test suite under a QEMU Nehalem CPU model without AVX2.
+
+The Ryzen host then ran the three retained article cases with native CPU features
+against rust-lapper 1.3.0 and the four pinned Rust competitors. Worked Lapper's
+total medians were 8.600, 97.084, and 779.564 ms. That is 37.30%, 98.89%, and
+34.64% faster than rust-lapper 1.3.0; the pathological `7-3` total improved by
+90.2 times. It ranked first on `1-2` and second on `7-3` and `8-7`. Alternating
+comparisons with SuperIntervals put the worked total 19.70% ahead, 5.38% behind,
+and 12.67% behind. All implementations returned identical overlap counts. CPU,
+compiler, flags, method, raw samples, and medians are retained in the
+[native AVX2 bakeoff record](https://github.com/sstadick/lapper_bakeoff/tree/main/results/avx2-2026-07-28).
+
+Completed:
 
 - Run the complete test suite on native x86-64 with AVX2 available.
 - Verify that the AVX2 backend is selected and executed, rather than only
   inspecting forced-target assembly.
-- Run the three retained datasets against rust-lapper 1.3.0, the worked Lapper,
-  and the pinned Rust competitors.
-- Test an x86-64 build or host without AVX2 and confirm the scalar fallback.
+- Exercise the complete x86-64 scalar suite under a CPU model without AVX2.
+- Run the three retained datasets on the Ryzen 9 3950X against rust-lapper
+  1.3.0, the worked Lapper, and the pinned Rust competitors.
 - Record CPU, compiler, build flags, raw samples, medians, and overlap counts.
 
-Pass condition: native AVX2 and non-AVX2 paths are correct, and the native AVX2
-performance record contains no unexplained regression.
+Release decision: physical non-AVX2 and Intel-branded hosts are not additional
+gates. QEMU executes the complete scalar x86-64 suite with AVX2 hidden, while
+native AMD hosts execute and benchmark the vendor-neutral AVX2 instruction
+path. Physical Intel measurements would add vendor-diverse performance data,
+not exercise a different implementation.
+
+Pass condition met: native AVX2 and modeled non-AVX2 paths are correct, and the
+native AVX2 record has no regression against rust-lapper 1.3.0.
 
 ## 2. Decide and document the effective MSRV
 

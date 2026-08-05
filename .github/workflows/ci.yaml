@@ -183,4 +183,4 @@ jobs:
         run: |
           test "$(uname -m)" = arm64
           cargo test --all-features --locked simd::dispatch_tests::selected_backend_matches_the_host -- --exact --nocapture
-          cargo test --all-features --locked --test portable_index every_primitive_integer_type_matches_forward_brute_force -- --exact
+          cargo test --all-features --locked --test portable_index every_primitive_integer_type_and_block_tail_matches_forward_brute_force -- --exact

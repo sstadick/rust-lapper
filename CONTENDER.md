@@ -31,7 +31,7 @@ AArch64 compiler output already contains paired loads, narrowing, and horizontal
 reduction, while forced-Haswell output contains the expected AVX2 compares and
 movemask instructions.
 
-Fresh native five-library total medians:
+Apple M3 AArch64 five-library total medians:
 
 | Case | SuperIntervals | Worked Lapper | COITrees | rust-bio IITree | rust-bio AVL |
 |---|---:|---:|---:|---:|---:|
@@ -41,8 +41,23 @@ Fresh native five-library total medians:
 
 Alternating direct trials confirmed the shape: Lapper won total time on 15/15
 `1-2` pairs, was 1.76% faster on `7-3`, and trailed by about 9.5% total on
-dense `8-7`. These are Apple M3 AArch64 measurements; AVX2 was compiled and
-instruction-audited but not timed on native Intel or AMD hardware.
+dense `8-7`.
+
+AMD Ryzen 9 3950X AVX2 five-library total medians:
+
+| Case | SuperIntervals | Worked Lapper | COITrees | rust-bio IITree | rust-bio AVL |
+|---|---:|---:|---:|---:|---:|
+| `1-2` | 11.968 ms | **8.600 ms** | 13.886 ms | 18.150 ms | 68.153 ms |
+| `7-3` | **90.807 ms** | 97.084 ms | 136.789 ms | 221.536 ms | 539.133 ms |
+| `8-7` | **685.273 ms** | 779.564 ms | 1101.420 ms | 1783.182 ms | 3302.566 ms |
+
+Runtime dispatch selected AVX2 and every implementation returned the expected
+overlap counts. Alternating SuperIntervals comparisons put worked totals 19.70%
+ahead on `1-2`, 5.38% behind on `7-3`, and 12.67% behind on `8-7`. Against
+rust-lapper 1.3.0, worked totals improved by 37.30%, 98.89%, and 34.64%;
+pathological `7-3` was 90.2 times faster. Raw samples and complete host/build
+metadata are retained in the
+[native AVX2 bakeoff record](https://github.com/sstadick/lapper_bakeoff/tree/main/results/avx2-2026-07-28).
 
 See [`PORTABLE_SIMD_INDEX.md`](PORTABLE_SIMD_INDEX.md) for the full design,
 safety argument, compatibility notes, tests, measurements, and identity audit.
