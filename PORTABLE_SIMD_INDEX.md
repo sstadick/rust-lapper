@@ -1,5 +1,8 @@
 # Portable forward-order SIMD index
 
+> This document is the retained design and validation record. See `README.md`
+> and the generated crate documentation for the concise user-facing contract.
+
 ## Goal
 
 This branch takes the fastest retained rust-lapper contender and makes it a

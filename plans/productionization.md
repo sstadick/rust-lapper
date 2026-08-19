@@ -1,5 +1,7 @@
 # Portable SIMD index production plan
 
+All five production gates in this retained decision record are complete.
+
 The implementation on `worked/portable-simd-index` is feature-complete for
 rust-lapper 2.0. Productionization is limited to the five gates below; changes
 preserve forward borrowed iteration order, exact overlap semantics, and the

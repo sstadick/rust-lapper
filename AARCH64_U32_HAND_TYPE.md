@@ -1,5 +1,9 @@
 # Hand-type the whole forward index: original Lapper to portable SIMD
 
+> This is a historical, checkpoint-based implementation course. Temporary APIs
+> and intermediate branches shown here are teaching steps; `README.md` and the
+> generated crate documentation describe the final public API.
+
 This is the single end-to-end exercise for understanding the worked
 rust-lapper contender. It starts with the original start-sorted linear iterator,
 adds the first per-interval skip index, replaces it with the 32-entry block

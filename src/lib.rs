@@ -408,7 +408,7 @@ where
         }
     }
 
-    /// Get the number fo positions covered by the intervals in Lapper and store it. If you are
+    /// Get the number of positions covered by the intervals in Lapper and store it. If you are
     /// going to be using the coverage, you should set it to avoid calculating it over and over.
     pub fn set_cov(&mut self) -> I {
         let cov = self.calculate_coverage();
@@ -451,7 +451,7 @@ where
         }
     }
 
-    /// Merge any intervals that overlap with eachother within the Lapper. This is an easy way to
+    /// Merge any intervals that overlap with each other within the Lapper. This is an easy way to
     /// speed up queries.
     pub fn merge_overlaps(&mut self) {
         let mut stack: VecDeque<&mut Interval<I, T>> = VecDeque::new();
@@ -535,15 +535,15 @@ where
         cursor
     }
 
-    /// Find the union and the intersect of two lapper objects.
-    /// Union: The set of positions found in both lappers
-    /// Intersect: The number of positions where both lappers intersect. Note that a position only
-    /// counts one time, multiple Intervals covering the same position don't add up.
+    /// Return the number of positions in the union and intersection of two Lappers.
+    ///
+    /// The union counts each position covered by either Lapper once. The intersection counts each
+    /// position covered by both Lappers once, regardless of how many intervals cover it.
     /// ``` rust
     /// use rust_lapper::{Lapper, Interval};
     /// type Iv = Interval<u32, u32>;
     /// let data1: Vec<Iv> = vec![
-    ///     Iv{start: 70, stop: 120, val: 0}, // max_len = 50
+    ///     Iv{start: 70, stop: 120, val: 0}, // a long interval
     ///     Iv{start: 10, stop: 15, val: 0}, // exact overlap
     ///     Iv{start: 12, stop: 15, val: 0}, // inner overlap
     ///     Iv{start: 14, stop: 16, val: 0}, // overlap end
@@ -718,11 +718,11 @@ where
     }
 
     /// Find all intervals that overlap the half-open query `[start, stop)`.
-    /// This method will work when queries
-    /// to this lapper are in sorted (start) order. It uses a linear search from the last query
-    /// instead of a binary search. A reference to a cursor must be passed in. This reference will
-    /// be modified and should be reused in the next query. This allows seek to not need to make
-    /// the lapper object mutable, and thus use the same lapper accross threads.
+    ///
+    /// Use this method when query starts arrive in nondecreasing order. A caller-owned cursor
+    /// narrows the first candidate block, after which `seek()` uses the same block traversal as
+    /// [`Lapper::find`]. Keeping the cursor outside `Lapper` allows immutable queries and preserves
+    /// `Sync` when `T` and `I` are `Sync`.
     /// ```
     /// use rust_lapper::{Lapper, Interval};
     /// let lapper = Lapper::new((0..100).step_by(5)
@@ -1530,7 +1530,7 @@ mod tests {
     }
 
     // When there is a very long interval that spans many little intervals, test that the little
-    // intevals still get returne properly
+    // Intervals still get returned properly.
     #[test]
     fn test_bad_skips() {
         let data = vec![

@@ -25,6 +25,27 @@ The `count()` method uses the
 [BITS algorithm](https://academic.oup.com/bioinformatics/article/29/1/1/273289)
 to count overlaps with two binary searches.
 
+## API and algorithm compatibility
+
+The block index and SIMD backends are private implementation details: there is
+no mode flag, alternate query method, or architecture-specific API. Existing
+call patterns for `find()`, `seek()`, `count()`, `cov()`, `set_cov()`,
+`merge_overlaps()`, `depth()`, `union_and_intersect()`, `union()`, and
+`intersect()` retain their range semantics and return types. `count()` remains
+the independent BITS implementation; methods that use `find()` or `seek()`
+internally automatically share the exact indexed query path.
+
+| Target | Mixed-block backend | Selection |
+|---|---|---|
+| AArch64 | 128-bit NEON | Baseline for the architecture |
+| x86-64 with AVX2 | 256-bit AVX2 | Runtime detected once per iterator |
+| x86-64 without AVX2 | Scalar | Automatic fallback |
+| Other architectures | Scalar | Automatic fallback |
+
+NEON and AVX2 cover `u8`, `i8`, `u16`, `i16`, `u32`, `i32`, `u64`, `i64`,
+`usize`, and `isize`. The same block algorithm uses exact scalar masks for
+`u128`, `i128`, custom `PrimInt` types, and partial vector tails.
+
 ## Minimum Supported Rust Version
 
 rust-lapper 2 supports Rust 1.59 and newer. Rust 1.59 is the first stable
@@ -80,7 +101,7 @@ fn main() {
             start: 70,
             stop: 120,
             val: 0,
-        }, // max_len = 50
+        }, // a long interval
         Iv {
             start: 10,
             stop: 15,
@@ -131,9 +152,8 @@ fn main() {
     // make lapper structure
     let mut lapper = Lapper::new(data);
 
-    // Iterator based find to extract all intervals that overlap 6..7
-    // If your queries are coming in start sorted order, use the seek method to retain a cursor for
-    // a big speedup.
+    // Find every interval that overlaps [11, 15).
+    // For queries in nondecreasing start order, seek() can reuse a caller-owned cursor.
     assert_eq!(
         lapper.find(11, 15).collect::<Vec<&Iv>>(),
         vec![
@@ -159,6 +179,7 @@ fn main() {
             }, // overlap end
         ]
     );
+    assert_eq!(lapper.count(11, 15), 4);
 
     // Merge overlapping regions to simplify queries that only depend on whether
     // any interval overlaps.
@@ -172,10 +193,10 @@ fn main() {
         },]
     );
 
-    // Get the number of positions covered by the lapper tree:
+    // Get the number of positions covered by the interval collection.
     assert_eq!(lapper.cov(), 73);
 
-    // Get the union and intersect of two different lapper trees
+    // Get the union and intersection lengths of two interval collections.
     let data = vec![
         Iv {
             start: 5,

@@ -1,5 +1,9 @@
 # rust-lapper 2 benchmark handoff
 
+> This is a reproducibility record for the exact pre-release benchmark commit
+> named below, not current installation or API guidance. The release-facing
+> summary lives in `README.md`.
+
 ## Objective
 
 Reproduce the rust-lapper 2 release performance check without relying on the
