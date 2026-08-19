@@ -1250,7 +1250,7 @@ Add tests that cross several block boundaries:
 ```bash
 cargo test --all-features insert_rebuilds_every_query_index
 cargo test --all-features merge_rebuilds_every_query_index
-cargo test --all-features serde_test
+cargo test --all-features serde_keeps_the_v1_six_field_representation
 ```
 
 ## Checkpoint 14: remove unsigned assumptions
@@ -1258,14 +1258,40 @@ cargo test --all-features serde_test
 Supporting signed primitive coordinates requires more than writing signed SIMD
 comparisons.
 
-Remove the `Unsigned` bound, then repair three scalar assumptions.
+Remove the `Unsigned` bound, then repair the scalar assumptions below.
 
-For `seek()`, saturation belongs at the type minimum, not zero:
+First, a valid signed interval can have a mathematical length larger than
+`I::max_value()`. Record that case while rebuilding instead of treating the
+failed subtraction as a zero-length interval:
 
 ```rust
-let earliest_start = start
-    .checked_sub(&self.max_len)
-    .unwrap_or_else(I::min_value);
+self.max_len = zero::<I>();
+self.max_len_overflowed = false;
+for interval in &self.intervals {
+    match interval.stop.checked_sub(&interval.start) {
+        Some(length) => self.max_len = std::cmp::max(self.max_len, length),
+        None if interval.stop >= interval.start => self.max_len_overflowed = true,
+        None => {}
+    }
+}
+```
+
+For ordinary `seek()` calls, saturation belongs at the type minimum, not zero.
+When `max_len_overflowed` is set, use the exact prefix index because no value of
+`I` can provide a conservative length bound:
+
+```rust
+if self.max_len_overflowed {
+    *cursor = self
+        .block_prefix_max_ends
+        .partition_point(|max_end| *max_end <= start)
+        * INDEX_BLOCK_SIZE;
+} else {
+    let earliest_start = start
+        .checked_sub(&self.max_len)
+        .unwrap_or_else(I::min_value);
+    // Retain the normal monotonic-cursor search.
+}
 ```
 
 For `count()`, avoid `start + 1`, which can overflow at the coordinate maximum:
@@ -1289,7 +1315,8 @@ overlaps = intervals with start < query_stop
 
 For `depth()`, zero cannot be an uninitialized sentinel. Add an explicit
 `initialized: bool` so a coverage interval crossing zero starts at its real
-negative coordinate.
+negative coordinate. After advancing to the merged interval's stop, break
+before constructing another one-unit query; that stop may be `I::max_value()`.
 
 ### Invariant
 
@@ -1304,9 +1331,11 @@ For ends `[-10, -2, 4, 9]` and query start `-2`, exactly the first two ends are
 ### Pass the gate
 
 ```bash
-cargo test --all-features every_primitive_integer_type_matches_forward_brute_force
+cargo test --all-features every_primitive_integer_type_and_block_tail_matches_forward_brute_force
 cargo test --all-features signed_seek_saturates_at_the_coordinate_minimum
+cargo test --all-features signed_seek_keeps_intervals_whose_length_exceeds_the_coordinate_type
 cargo test --all-features signed_depth_crosses_zero_once
+cargo test --all-features signed_depth_stops_at_the_coordinate_maximum
 ```
 
 ## Checkpoint 15: remove only proven bounds checks
@@ -1409,7 +1438,7 @@ The sidecars support three distinct public query shapes:
 | API | Entry strategy | Result strategy |
 |---|---|---|
 | `find(start, stop)` | Binary-search `block_prefix_max_ends` | Lazily enumerate borrowed intervals through block routes |
-| `seek(start, stop, cursor)` | Reuse a monotonic-query cursor, bounded by `max_len`, then round down to its block | Use the same lazy block iterator as `find()` |
+| `seek(start, stop, cursor)` | Reuse a monotonic-query cursor bounded by `max_len`, or use the exact block-prefix search if a signed length overflowed, then round down to a block | Use the same lazy block iterator as `find()` |
 | `count(start, stop)` | Binary-search global `starts` and global `stops` | Subtract the two excluded endpoint populations without enumeration |
 
 `find()` answers arbitrary queries independently. `seek()` is the same overlap
@@ -1444,6 +1473,7 @@ index.
 | `block_index` | One per 32 | First later block with greater max end |
 | `block_prefix_max_ends` | Running max | Binary-search first possible block |
 | `max_len` | Scalar | Conservative cursor movement in `seek()` |
+| `max_len_overflowed` | Scalar flag | Select exact prefix entry when no `I`-sized length bound is conservative |
 
 Complexity is:
 

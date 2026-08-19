@@ -110,6 +110,8 @@ where
     block_prefix_max_ends: Vec<I>,
     /// The length of the longest interval
     max_len: I,
+    /// Whether a valid interval length exceeds the positive range of `I`.
+    max_len_overflowed: bool,
     /// The calculated number of positions covered by the intervals
     cov: Option<I>,
     /// Whether or not overlaps have been merged
@@ -259,6 +261,7 @@ where
             block_min_ends: Vec::new(),
             block_prefix_max_ends: Vec::new(),
             max_len: zero::<I>(),
+            max_len_overflowed: false,
             cov: None,
             overlaps_merged: false,
         };
@@ -276,17 +279,15 @@ where
         self.stops = stops_by_start.clone();
         self.stops_by_start = stops_by_start;
 
-        self.max_len = self
-            .intervals
-            .iter()
-            .map(|interval| {
-                interval
-                    .stop
-                    .checked_sub(&interval.start)
-                    .unwrap_or_else(zero::<I>)
-            })
-            .max()
-            .unwrap_or_else(zero::<I>);
+        self.max_len = zero::<I>();
+        self.max_len_overflowed = false;
+        for interval in &self.intervals {
+            match interval.stop.checked_sub(&interval.start) {
+                Some(length) => self.max_len = std::cmp::max(self.max_len, length),
+                None if interval.stop >= interval.start => self.max_len_overflowed = true,
+                None => {}
+            }
+        }
 
         #[cfg(feature = "sort_unstable")]
         self.stops.sort_unstable();
@@ -734,18 +735,26 @@ where
     /// ```
     #[inline]
     pub fn seek<'a>(&'a self, start: I, stop: I, cursor: &mut usize) -> IterFind<'a, I, T> {
-        let earliest_start = start
-            .checked_sub(&self.max_len)
-            .unwrap_or_else(I::min_value);
-        if *cursor == 0 || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
-        {
-            *cursor = Self::lower_bound(earliest_start, &self.intervals);
-        }
+        if self.max_len_overflowed {
+            *cursor = self
+                .block_prefix_max_ends
+                .partition_point(|max_end| *max_end <= start)
+                * INDEX_BLOCK_SIZE;
+        } else {
+            let earliest_start = start
+                .checked_sub(&self.max_len)
+                .unwrap_or_else(I::min_value);
+            if *cursor == 0
+                || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
+            {
+                *cursor = Self::lower_bound(earliest_start, &self.intervals);
+            }
 
-        while *cursor + 1 < self.intervals.len()
-            && self.intervals[*cursor + 1].start < earliest_start
-        {
-            *cursor += 1;
+            while *cursor + 1 < self.intervals.len()
+                && self.intervals[*cursor + 1].start < earliest_start
+            {
+                *cursor += 1;
+            }
         }
 
         IterFind {
@@ -921,6 +930,9 @@ where
         let mut new_depth_at_point = depth_at_point;
         while new_depth_at_point == depth_at_point && self.curr_merged_pos < interval.stop {
             self.curr_merged_pos = self.curr_merged_pos + one::<I>();
+            if self.curr_merged_pos == interval.stop {
+                break;
+            }
             new_depth_at_point = self
                 .inner
                 .seek(

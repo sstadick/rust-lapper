@@ -206,22 +206,26 @@ path recovered build time that an earlier incremental prototype had lost.
 
 With `with_serde`, serialization deliberately writes the original six fields:
 `intervals`, `starts`, `stops`, `max_len`, `cov`, and `overlaps_merged`. New
-private sidecars are not serialized. Deserialization treats `intervals` as the
-source of truth and rebuilds every sidecar, then restores the cached coverage and
-merge flag. Existing serialized shape therefore does not acquire architecture-
-or implementation-specific metadata.
+private sidecars and the length-overflow flag are not serialized. Deserialization
+treats `intervals` as the source of truth and rebuilds every derived value, then
+restores the cached coverage and merge flag. Existing serialized shape therefore
+does not acquire architecture- or implementation-specific metadata.
 
 ## Signed-coordinate corrections
 
-Generalizing beyond unsigned coordinates exposed three assumptions in the old
+Generalizing beyond unsigned coordinates exposed several assumptions in the old
 code:
 
-- `seek()` now uses `checked_sub(max_len)` and falls back to `I::min_value()`;
+- derived state records when a valid interval length cannot fit in `I`; in that
+  rare case, `seek()` uses the exact block-prefix search instead of an
+  underestimated `max_len`;
+- otherwise, `seek()` uses `checked_sub(max_len)` and falls back to
+  `I::min_value()`;
 - `count()` uses `partition_point(stop <= start)` instead of forming `start + 1`,
   which can overflow at the coordinate maximum; and
 - `depth()` has an explicit initialization flag instead of using zero as a
-  sentinel, so an interval spanning negative through positive coordinates begins
-  at its actual start.
+  sentinel, and stops at a merged endpoint before forming a one-unit query past
+  `I::max_value()`.
 
 These are scalar correctness repairs needed by the wider type support; they are
 not query heuristics.
@@ -285,7 +289,9 @@ Coverage includes:
 - randomized `find()`, `seek()`, and `count()` against brute force;
 - exact reference order for all primitive integer coordinate types, including
   the scalar `u128` and `i128` fallbacks;
-- negative intervals and a query at the signed minimum;
+- negative intervals, a query at the signed minimum, an interval whose length
+  exceeds the signed coordinate's positive range, and depth ending at the
+  signed maximum;
 - insert and merge rebuilding across more than four blocks;
 - serde round trips with derived metadata reconstruction;
 - signed depth across zero;

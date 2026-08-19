@@ -149,6 +149,34 @@ fn signed_seek_saturates_at_the_coordinate_minimum() {
 }
 
 #[test]
+fn signed_seek_keeps_intervals_whose_length_exceeds_the_coordinate_type() {
+    let mut intervals = vec![Interval {
+        start: i8::MIN,
+        stop: i8::MAX,
+        val: 0_usize,
+    }];
+    intervals.extend((-127_i16..=99).enumerate().map(|(value, raw_start)| {
+        let start = raw_start as i8;
+        Interval {
+            start,
+            stop: start + 1,
+            val: value + 1,
+        }
+    }));
+
+    let lapper = Lapper::new(intervals);
+    let expected: Vec<_> = lapper.find(100, 101).map(|interval| interval.val).collect();
+    let mut cursor = 0;
+    let sought: Vec<_> = lapper
+        .seek(100, 101, &mut cursor)
+        .map(|interval| interval.val)
+        .collect();
+
+    assert_eq!(expected, vec![0]);
+    assert_eq!(sought, expected);
+}
+
+#[test]
 fn signed_depth_crosses_zero_once() {
     let lapper = Lapper::new(vec![Interval {
         start: -2_i16,
@@ -162,6 +190,24 @@ fn signed_depth_crosses_zero_once() {
             start: -2,
             stop: 3,
             val: 1
+        }]
+    );
+}
+
+#[test]
+fn signed_depth_stops_at_the_coordinate_maximum() {
+    let lapper = Lapper::new(vec![Interval {
+        start: 126_i8,
+        stop: i8::MAX,
+        val: (),
+    }]);
+
+    assert_eq!(
+        lapper.depth().collect::<Vec<_>>(),
+        vec![Interval {
+            start: 126,
+            stop: i8::MAX,
+            val: 1,
         }]
     );
 }
