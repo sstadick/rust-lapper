@@ -1,83 +1,186 @@
 name: ci
 
-on: [ push, pull_request ]
+on:
+  push:
+    branches: [ master ]
+  pull_request:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: stable
 
 jobs:
+  msrv:
+    name: MSRV 1.59
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: 1.59.0
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@1.59.0
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test on the MSRV
+        run: cargo test --all-features --locked
+
+      - name: Check AArch64 NEON on the MSRV
+        run: cargo check --lib --all-features --locked --target aarch64-unknown-linux-gnu
+
   check:
     name: Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v7
 
-      - name: Install pinned toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: 1.95.0
-          override: true
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v1
+        uses: Swatinem/rust-cache@v2
 
       - name: Run cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --all-features
+        run: cargo check --all-targets --all-features --locked
 
   lints:
     name: Lints
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v7
 
-      - name: Install pinned toolchain
-        uses: actions-rs/toolchain@v1
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: 1.95.0
-          override: true
-          components: rustfmt, clippy
+          components: rustfmt,clippy
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v1
+        uses: Swatinem/rust-cache@v2
 
       - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo fmt --all -- --check
 
       - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+  native-avx2:
+    name: Native AVX2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Record and require AVX2
+        run: |
+          lscpu
+          grep -qw avx2 /proc/cpuinfo
+
+      - name: Exercise runtime dispatch and AVX2 masks
+        run: |
+          cargo test --all-features --locked simd::dispatch_tests::selected_backend_matches_the_host -- --exact --nocapture
+          cargo test --all-features --locked simd::avx2::tests::primitive_masks_match_scalar_when_avx2_is_available -- --exact --nocapture
+
+  scalar-x86:
+    name: Scalar x86-64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes qemu-user
+          qemu-x86_64 --version
+
+      - name: Exercise scalar runtime dispatch without AVX2
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: qemu-x86_64 -cpu Nehalem
+        run: |
+          cargo test --all-features --locked --target x86_64-unknown-linux-gnu simd::dispatch_tests::selected_backend_matches_the_host -- --exact --nocapture
+          cargo test --all-features --locked --target x86_64-unknown-linux-gnu
+
+  scalar-targets:
+    name: Scalar fallback targets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          command: clippy
-          args: --all-features -- -D warnings
+          targets: i686-unknown-linux-gnu,powerpc64le-unknown-linux-gnu,wasm32-unknown-unknown
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check scalar-only architectures
+        run: |
+          cargo check --lib --all-features --locked --target i686-unknown-linux-gnu
+          cargo check --lib --all-features --locked --target powerpc64le-unknown-linux-gnu
+          cargo check --lib --all-features --locked --target wasm32-unknown-unknown
 
   test:
-    name: Test Suite
+    name: Test Suite (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest, macOS-latest, windows-latest ]
+        include:
+          - name: Linux, default features
+            os: ubuntu-latest
+            features: ""
+          - name: Linux, serde
+            os: ubuntu-latest
+            features: --features with_serde
+          - name: Linux, unstable sort
+            os: ubuntu-latest
+            features: --features sort_unstable
+          - name: Linux, all features
+            os: ubuntu-latest
+            features: --all-features
+          - name: macOS ARM64, all features
+            os: macos-15
+            features: --all-features
+            neon: true
+          - name: Windows, all features
+            os: windows-latest
+            features: --all-features
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v7
 
-      - name: Install pinned toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: 1.95.0
-          override: true
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v1
+        uses: Swatinem/rust-cache@v2
 
       - name: Run tests
-        run: cargo test --verbose --all-features
+        run: cargo test --verbose --locked ${{ matrix.features }}
+
+      - name: Verify native NEON dispatch
+        if: matrix.neon
+        run: |
+          test "$(uname -m)" = arm64
+          cargo test --all-features --locked simd::dispatch_tests::selected_backend_matches_the_host -- --exact --nocapture
+          cargo test --all-features --locked --test portable_index every_primitive_integer_type_and_block_tail_matches_forward_brute_force -- --exact

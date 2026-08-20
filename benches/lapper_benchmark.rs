@@ -14,7 +14,7 @@ type Iv = Interval<u32, bool>;
 
 fn randomi(imin: u32, imax: u32) -> u32 {
     let mut rng = rand::thread_rng();
-    imin + rng.gen_range(0, imax - imin)
+    imin + rng.gen_range(0..imax - imin)
 }
 
 fn make_random(n: usize, range_max: u32, size_min: u32, size_max: u32) -> Vec<Iv> {
@@ -52,8 +52,8 @@ fn make_random_seeded(
     let mut rng = StdRng::seed_from_u64(seed);
     let mut result = Vec::with_capacity(n);
     for _ in 0..n {
-        let s = rng.gen_range(0, range_max);
-        let e = s + rng.gen_range(size_min, size_max);
+        let s = rng.gen_range(0..range_max);
+        let e = s + rng.gen_range(size_min..size_max);
         result.push(Interval {
             start: s,
             stop: e,

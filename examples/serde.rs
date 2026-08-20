@@ -8,7 +8,7 @@ fn main() {
             start: 70,
             stop: 120,
             val: 0,
-        }, // max_len = 50
+        }, // a long interval
         Iv {
             start: 10,
             stop: 15,
@@ -59,9 +59,8 @@ fn main() {
     // make lapper structure
     let mut lapper = Lapper::new(data);
 
-    // Iterator based find to extract all intervals that overlap 6..7
-    // If your queries are coming in start sorted order, use the seek method to retain a cursor for
-    // a big speedup.
+    // Find every interval that overlaps [11, 15).
+    // For queries in nondecreasing start order, seek() can reuse a caller-owned cursor.
     assert_eq!(
         lapper.find(11, 15).collect::<Vec<&Iv>>(),
         vec![
@@ -87,9 +86,10 @@ fn main() {
             }, // overlap end
         ]
     );
+    assert_eq!(lapper.count(11, 15), 4);
 
-    // Merge overlaping regions within the lapper to simplifiy and speed up quries that only depend
-    // on 'any
+    // Merge overlapping regions to simplify queries that only depend on whether
+    // any interval overlaps.
     lapper.merge_overlaps();
     assert_eq!(
         lapper.find(11, 15).collect::<Vec<&Iv>>(),
@@ -100,10 +100,10 @@ fn main() {
         },]
     );
 
-    // Get the number of positions covered by the lapper tree:
+    // Get the number of positions covered by the interval collection.
     assert_eq!(lapper.cov(), 73);
 
-    // Get the union and intersect of two different lapper trees
+    // Get the union and intersection lengths of two interval collections.
     let data = vec![
         Iv {
             start: 5,
@@ -130,6 +130,7 @@ fn main() {
 
     let encoded = bincode::serialize(&lapper).unwrap();
     let decoded: Lapper<usize, u32> = bincode::deserialize(&encoded[..]).unwrap();
-    dbg!(lapper);
-    dbg!(decoded);
+    assert_eq!(decoded.intervals, lapper.intervals);
+    assert_eq!(decoded.cov(), lapper.cov());
+    assert_eq!(decoded.count(11, 15), lapper.count(11, 15));
 }

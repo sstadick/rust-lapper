@@ -1,50 +1,59 @@
-//! This module provides a simple data-structure for fast interval searches.
+//! This module provides a simple data structure for fast interval searches.
 //! ## Features
-//! - Extremely fast on most genomic datasets. (3-4x faster than other methods)
-//! - Extremely fast on in order queries. (10x faster than other methods)
-//! - Extremely fast intersections count method based on the
+//! - Extremely fast overlap queries on both ordinary genomic datasets and
+//!   datasets with long intervals that engulf many shorter intervals.
+//! - Extremely fast in order queries through the cursor-based `seek()` method.
+//! - Extremely fast intersection counts based on the
 //!   [BITS](https://arxiv.org/pdf/1208.3407.pdf) algorithm
-//! - Parallel friendly. Queries are on an immutable structure, even for seek
-//! - Consumer / Adapter paradigm, Iterators are returned and serve as the main API for interacting
-//!   with the lapper
+//! - NEON acceleration on AArch64, runtime-detected AVX2 on x86-64, and an exact
+//!   scalar fallback everywhere else.
+//! - Parallel friendly. Queries are on an immutable structure, even for `seek()`.
+//! - Consumer / Adapter paradigm. Iterators are returned and serve as the main
+//!   API for interacting with the Lapper.
 //!
 //! ## Details:
 //!
 //! ```text
-//!       0  1  2  3  4  5  6  7  8  9  10 11
-//! (0,10]X  X  X  X  X  X  X  X  X  X
-//! (2,5]       X  X  X
-//! (3,8]          X  X  X  X  X
-//! (3,8]          X  X  X  X  X
-//! (3,8]          X  X  X  X  X
-//! (3,8]          X  X  X  X  X
-//! (5,9]                X  X  X  X
-//! (8,11]                        X  X  X
+//!          0  1  2  3  4  5  6  7  8  9  10 11
+//! [0, 10)  X  X  X  X  X  X  X  X  X  X
+//! [2, 5)         X  X  X
+//! [3, 8)            X  X  X  X  X
+//! [3, 8)            X  X  X  X  X
+//! [3, 8)            X  X  X  X  X
+//! [3, 8)            X  X  X  X  X
+//! [5, 9)                  X  X  X  X
+//! [8, 11)                          X  X  X
 //!
-//! Query: (8, 11]
-//! Answer: ((0,10], (5,9], (8,11])
+//! Query:  [8, 11)
+//! Answer: [0, 10), [5, 9), [8, 11)
 //! ```
 //!
-//! Most interaction with this crate will be through the [`Lapper`](struct.Lapper.html) struct
-//! The main methods are [`find`](struct.Lapper.html#method.find),
-//! [`seek`](struct.Lapper.html#method.seek), and [`count`](struct.Lapper.html#method.count)
-//! where both `seek` and `count` are special cases allowing for very fast queries in certain scenarios.
+//! Most interaction with this crate will be through the [`Lapper`] struct. The
+//! main methods are [`Lapper::find`], [`Lapper::seek`], and [`Lapper::count`].
+//! `find()` handles independent queries, `seek()` reuses a caller-owned cursor
+//! when query starts arrive in order, and `count()` is used when only the number
+//! of overlaps is needed.
 //!
-//! The overlap function for this assumes a zero based genomic coordinate system. So [start, stop)
-//! is not inclusive of the stop position for neither the queries, nor the Intervals.
+//! Ranges are half-open: `[start, stop)`. Two ranges overlap when
+//! `interval.start < query.stop` and `interval.stop > query.start`, so adjacent
+//! ranges such as `[0, 10)` and `[10, 20)` do not overlap. This matches the
+//! usual zero-based genomic coordinate system. Signed and unsigned primitive
+//! coordinates are supported.
 //!
-//! Lapper does not use an interval tree, instead, it operates on the assumtion that most intervals are
-//! of similar length; or, more exactly, that the longest interval in the set is not long compred to
-//! the average distance between intervals.
+//! Lapper does not use an interval tree. It keeps intervals sorted by start and
+//! builds a small index over fixed blocks of 32 intervals. A prefix maximum
+//! finds the first block that could overlap; each block's minimum and maximum
+//! end positions then prove whether the block is a miss or a dense prefix, and
+//! a next-greater link skips runs of blocks that cannot overlap. Mixed blocks
+//! produce an exact 32-bit overlap mask with NEON, AVX2, or the scalar fallback.
+//! Mask bits are drained from low to high, so results remain borrowed and in
+//! ascending start order.
 //!
-//! For cases where this holds true (as it often does with genomic data), we can sort by start and
-//! use binary search on the starts, accounting for the length of the longest interval. The advantage
-//! of this approach is simplicity of implementation and speed. In realistic tests queries returning
-//! the overlapping intervals are 1000 times faster than brute force and queries that merely check
-//! for the overlaps are > 5000 times faster.
-//!
-//! When this is not the case, if possible in your scenario, use merge_overlaps first, and then use
-//! `find` or `seek`. The `count` method will be fast in all scenarios.
+//! The same block algorithm handles ordinary data and the old worst case where
+//! one long interval engulfs many shorter intervals. There is no workload mode
+//! to configure. `merge_overlaps()` remains useful when callers want merged
+//! coverage, while `count()` remains the independent BITS implementation and is
+//! fast regardless of interval shape.
 //!
 //! # Examples
 //!
@@ -77,13 +86,17 @@
 //! ```
 use num_traits::{
     identities::{one, zero},
-    PrimInt, Unsigned,
+    PrimInt,
 };
 use std::cmp::Ordering::{self};
 use std::collections::VecDeque;
 
+mod simd;
+
+use simd::{detect_backend, overlap_mask, MaskBackend, BLOCK_SIZE as INDEX_BLOCK_SIZE};
+
 #[cfg(feature = "with_serde")]
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Represent a range from [start, stop)
 /// Inclusive start, exclusive of stop
@@ -91,7 +104,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Eq, Debug, Clone)]
 pub struct Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     pub start: I,
@@ -99,32 +112,107 @@ where
     pub val: T,
 }
 
-/// Primary object of the library. The public intervals holds all the intervals and can be used for
-/// iterating / pulling values out of the tree.
-#[cfg_attr(feature = "with_serde", derive(Serialize, Deserialize))]
+/// Primary interval collection and query index.
+///
+/// The public interval vector is the canonical storage and can be read or used
+/// to mutate payload values. Coordinate or structural changes must use
+/// [`Lapper::insert`] or [`Lapper::merge_overlaps`] so the private query index
+/// is rebuilt.
 #[derive(Debug, Clone)]
 pub struct Lapper<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
-    /// List of intervals
+    /// Intervals in ascending start order.
+    ///
+    /// Directly changing coordinates or vector length leaves the private query
+    /// index stale. Payload-only changes are safe.
     pub intervals: Vec<Interval<I, T>>,
     /// Sorted list of start positions,
     starts: Vec<I>,
     /// Sorted list of end positions,
     stops: Vec<I>,
+    /// End positions in the same order as `intervals`, for block-mask queries.
+    stops_by_start: Vec<I>,
+    /// Index of the next block with a strictly larger maximum end, or the
+    /// number of blocks when no such block exists.
+    block_index: Vec<usize>,
+    /// Maximum end position in each fixed-size block.
+    block_max_ends: Vec<I>,
+    /// Minimum end position in each fixed-size block.
+    block_min_ends: Vec<I>,
+    /// Inclusive prefix maximum of `block_max_ends`, used to find the first
+    /// candidate block for a query.
+    block_prefix_max_ends: Vec<I>,
     /// The length of the longest interval
     max_len: I,
+    /// Whether a valid interval length exceeds the positive range of `I`.
+    max_len_overflowed: bool,
     /// The calculated number of positions covered by the intervals
     cov: Option<I>,
     /// Whether or not overlaps have been merged
     pub overlaps_merged: bool,
 }
 
+#[cfg(feature = "with_serde")]
+impl<I, T> Serialize for Lapper<I, T>
+where
+    I: PrimInt + Ord + Clone + Send + Sync + Serialize,
+    T: Eq + Clone + Send + Sync + Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("Lapper", 6)?;
+        state.serialize_field("intervals", &self.intervals)?;
+        state.serialize_field("starts", &self.starts)?;
+        state.serialize_field("stops", &self.stops)?;
+        state.serialize_field("max_len", &self.max_len)?;
+        state.serialize_field("cov", &self.cov)?;
+        state.serialize_field("overlaps_merged", &self.overlaps_merged)?;
+        state.end()
+    }
+}
+
+#[cfg(feature = "with_serde")]
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct SerializedLapper<I, T>
+where
+    I: PrimInt + Ord + Clone + Send + Sync,
+    T: Eq + Clone + Send + Sync,
+{
+    intervals: Vec<Interval<I, T>>,
+    starts: Vec<I>,
+    stops: Vec<I>,
+    max_len: I,
+    cov: Option<I>,
+    overlaps_merged: bool,
+}
+
+#[cfg(feature = "with_serde")]
+impl<'de, I, T> Deserialize<'de> for Lapper<I, T>
+where
+    I: PrimInt + Ord + Clone + Send + Sync + Deserialize<'de> + 'static,
+    T: Eq + Clone + Send + Sync + Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let serialized = SerializedLapper::<I, T>::deserialize(deserializer)?;
+        let mut lapper = Self::new(serialized.intervals);
+        lapper.cov = serialized.cov;
+        lapper.overlaps_merged = serialized.overlaps_merged;
+        Ok(lapper)
+    }
+}
+
 impl<I, T> Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     /// Compute the intsect between two intervals
@@ -144,7 +232,7 @@ where
 
 impl<I, T> Ord for Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -159,7 +247,7 @@ where
 
 impl<I, T> PartialOrd for Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -170,7 +258,7 @@ where
 
 impl<I, T> PartialEq for Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -181,7 +269,7 @@ where
 
 impl<I, T> Lapper<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync + 'static,
     T: Eq + Clone + Send + Sync,
 {
     /// Create a new instance of Lapper by passing in a vector of Intervals. This vector will
@@ -200,38 +288,87 @@ where
         #[cfg(not(feature = "sort_unstable"))]
         intervals.sort();
 
-        let (mut starts, mut stops): (Vec<_>, Vec<_>) =
-            intervals.iter().map(|x| (x.start, x.stop)).unzip();
-
-        #[cfg(feature = "sort_unstable")]
-        {
-            starts.sort_unstable();
-            stops.sort_unstable();
-        }
-
-        #[cfg(not(feature = "sort_unstable"))]
-        {
-            starts.sort();
-            stops.sort();
-        }
-
-        let mut max_len = zero::<I>();
-        for interval in intervals.iter() {
-            let i_len = interval
-                .stop
-                .checked_sub(&interval.start)
-                .unwrap_or_else(zero::<I>);
-            if i_len > max_len {
-                max_len = i_len;
-            }
-        }
-        Lapper {
+        let mut lapper = Lapper {
             intervals,
-            starts,
-            stops,
-            max_len,
+            starts: Vec::new(),
+            stops: Vec::new(),
+            stops_by_start: Vec::new(),
+            block_index: Vec::new(),
+            block_max_ends: Vec::new(),
+            block_min_ends: Vec::new(),
+            block_prefix_max_ends: Vec::new(),
+            max_len: zero::<I>(),
+            max_len_overflowed: false,
             cov: None,
             overlaps_merged: false,
+        };
+        lapper.rebuild_derived();
+        lapper
+    }
+
+    fn rebuild_derived(&mut self) {
+        let (starts, stops_by_start): (Vec<_>, Vec<_>) = self
+            .intervals
+            .iter()
+            .map(|interval| (interval.start, interval.stop))
+            .unzip();
+        self.starts = starts;
+        self.stops = stops_by_start.clone();
+        self.stops_by_start = stops_by_start;
+
+        self.max_len = zero::<I>();
+        self.max_len_overflowed = false;
+        for interval in &self.intervals {
+            match interval.stop.checked_sub(&interval.start) {
+                Some(length) => self.max_len = std::cmp::max(self.max_len, length),
+                None if interval.stop >= interval.start => self.max_len_overflowed = true,
+                None => {}
+            }
+        }
+
+        #[cfg(feature = "sort_unstable")]
+        self.stops.sort_unstable();
+
+        #[cfg(not(feature = "sort_unstable"))]
+        self.stops.sort();
+
+        self.block_max_ends.clear();
+        self.block_min_ends.clear();
+        let interval_count = self.intervals.len();
+        let block_count =
+            interval_count / INDEX_BLOCK_SIZE + usize::from(interval_count % INDEX_BLOCK_SIZE != 0);
+        self.block_max_ends.reserve(block_count);
+        self.block_min_ends.reserve(block_count);
+        for block in self.intervals.chunks(INDEX_BLOCK_SIZE) {
+            let mut max_end = block[0].stop;
+            let mut min_end = max_end;
+            for interval in &block[1..] {
+                max_end = std::cmp::max(max_end, interval.stop);
+                min_end = std::cmp::min(min_end, interval.stop);
+            }
+            self.block_max_ends.push(max_end);
+            self.block_min_ends.push(min_end);
+        }
+
+        self.block_index.clear();
+        self.block_index.resize(block_count, block_count);
+        let mut stack = Vec::<usize>::new();
+        for block in (0..block_count).rev() {
+            while stack.last().map_or(false, |&next| {
+                self.block_max_ends[next] <= self.block_max_ends[block]
+            }) {
+                stack.pop();
+            }
+            self.block_index[block] = stack.last().copied().unwrap_or(block_count);
+            stack.push(block);
+        }
+
+        self.block_prefix_max_ends.clone_from(&self.block_max_ends);
+        for block in 1..block_count {
+            self.block_prefix_max_ends[block] = std::cmp::max(
+                self.block_prefix_max_ends[block - 1],
+                self.block_prefix_max_ends[block],
+            );
         }
     }
 
@@ -258,16 +395,9 @@ where
     ///
     /// ```
     pub fn insert(&mut self, elem: Interval<I, T>) {
-        let starts_insert_index = Self::bsearch_seq(elem.start, &self.starts);
-        let stops_insert_index = Self::bsearch_seq(elem.stop, &self.stops);
         let intervals_insert_index = Self::bsearch_seq_ref(&elem, &self.intervals);
-        let i_len = elem.stop.checked_sub(&elem.start).unwrap_or_else(zero::<I>);
-        if i_len > self.max_len {
-            self.max_len = i_len;
-        }
-        self.starts.insert(starts_insert_index, elem.start);
-        self.stops.insert(stops_insert_index, elem.stop);
         self.intervals.insert(intervals_insert_index, elem);
+        self.rebuild_derived();
         self.cov = None;
         self.overlaps_merged = false;
     }
@@ -315,7 +445,7 @@ where
         }
     }
 
-    /// Get the number fo positions covered by the intervals in Lapper and store it. If you are
+    /// Get the number of positions covered by the intervals in Lapper and store it. If you are
     /// going to be using the coverage, you should set it to avoid calculating it over and over.
     pub fn set_cov(&mut self) -> I {
         let cov = self.calculate_coverage();
@@ -358,7 +488,7 @@ where
         }
     }
 
-    /// Merge any intervals that overlap with eachother within the Lapper. This is an easy way to
+    /// Merge any intervals that overlap with each other within the Lapper. This is an easy way to
     /// speed up queries.
     pub fn merge_overlaps(&mut self) {
         let mut stack: VecDeque<&mut Interval<I, T>> = VecDeque::new();
@@ -389,30 +519,7 @@ where
                 })
                 .collect();
         }
-        // Fix the starts and stops used by counts
-        let (mut starts, mut stops): (Vec<_>, Vec<_>) =
-            self.intervals.iter().map(|x| (x.start, x.stop)).unzip();
-
-        #[cfg(feature = "sort_unstable")]
-        {
-            starts.sort_unstable();
-            stops.sort_unstable();
-        }
-
-        #[cfg(not(feature = "sort_unstable"))]
-        {
-            starts.sort();
-            stops.sort();
-        }
-
-        self.starts = starts;
-        self.stops = stops;
-        self.max_len = self
-            .intervals
-            .iter()
-            .map(|x| x.stop.checked_sub(&x.start).unwrap_or_else(zero::<I>))
-            .max()
-            .unwrap_or_else(zero::<I>);
+        self.rebuild_derived();
     }
 
     /// Determine the first index that we should start checking for overlaps for via a binary
@@ -465,15 +572,15 @@ where
         cursor
     }
 
-    /// Find the union and the intersect of two lapper objects.
-    /// Union: The set of positions found in both lappers
-    /// Intersect: The number of positions where both lappers intersect. Note that a position only
-    /// counts one time, multiple Intervals covering the same position don't add up.
+    /// Return the number of positions in the union and intersection of two Lappers.
+    ///
+    /// The union counts each position covered by either Lapper once. The intersection counts each
+    /// position covered by both Lappers once, regardless of how many intervals cover it.
     /// ``` rust
     /// use rust_lapper::{Lapper, Interval};
     /// type Iv = Interval<u32, u32>;
     /// let data1: Vec<Iv> = vec![
-    ///     Iv{start: 70, stop: 120, val: 0}, // max_len = 50
+    ///     Iv{start: 70, stop: 120, val: 0}, // a long interval
     ///     Iv{start: 10, stop: 15, val: 0}, // exact overlap
     ///     Iv{start: 12, stop: 15, val: 0}, // inner overlap
     ///     Iv{start: 14, stop: 16, val: 0}, // overlap end
@@ -591,13 +698,15 @@ where
             inner: self,
             merged: merged_lapper,
             curr_merged_pos: zero::<I>(),
+            initialized: false,
             curr_pos: 0,
             cursor: 0,
             end: merged_len,
         }
     }
 
-    /// Count all intervals that overlap start .. stop. This performs two binary search in order to
+    /// Count all intervals that overlap the half-open query `[start, stop)`.
+    /// This performs two binary searches in order to
     /// find all the excluded elements, and then deduces the intersection from there. See
     /// [BITS](https://arxiv.org/pdf/1208.3407.pdf) for more details.
     /// ```
@@ -610,14 +719,15 @@ where
     #[inline]
     pub fn count(&self, start: I, stop: I) -> usize {
         let len = self.intervals.len();
-        // Plus one to account for half-openness of lapper intervals compared to BITS paper
-        let first = Self::bsearch_seq(start + one::<I>(), &self.stops);
+        let first = self
+            .stops
+            .partition_point(|interval_stop| *interval_stop <= start);
         let last = Self::bsearch_seq(stop, &self.starts);
         let num_cant_after = len - last;
         len - first - num_cant_after
     }
 
-    /// Find all intervals that overlap start .. stop
+    /// Find all intervals that overlap the half-open query `[start, stop)`.
     /// ```
     /// use rust_lapper::{Lapper, Interval};
     /// let lapper = Lapper::new((0..100).step_by(5)
@@ -627,22 +737,29 @@ where
     /// ```
     #[inline]
     pub fn find(&self, start: I, stop: I) -> IterFind<'_, I, T> {
+        let off = self
+            .block_prefix_max_ends
+            .partition_point(|max_end| *max_end <= start)
+            * INDEX_BLOCK_SIZE;
         IterFind {
             inner: self,
-            off: Self::lower_bound(
-                start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>),
-                &self.intervals,
-            ),
+            next_block_start: off,
+            mask_block_start: 0,
+            mask: 0,
+            dense_next: 0,
+            dense_end: 0,
+            backend: detect_backend(),
             start,
             stop,
         }
     }
 
-    /// Find all intevals that overlap start .. stop. This method will work when queries
-    /// to this lapper are in sorted (start) order. It uses a linear search from the last query
-    /// instead of a binary search. A reference to a cursor must be passed in. This reference will
-    /// be modified and should be reused in the next query. This allows seek to not need to make
-    /// the lapper object mutable, and thus use the same lapper accross threads.
+    /// Find all intervals that overlap the half-open query `[start, stop)`.
+    ///
+    /// Use this method when query starts arrive in nondecreasing order. A caller-owned cursor
+    /// narrows the first candidate block, after which `seek()` uses the same block traversal as
+    /// [`Lapper::find`]. Keeping the cursor outside `Lapper` allows immutable queries and preserves
+    /// `Sync` when `T` and `I` are `Sync`.
     /// ```
     /// use rust_lapper::{Lapper, Interval};
     /// let lapper = Lapper::new((0..100).step_by(5)
@@ -655,24 +772,36 @@ where
     /// ```
     #[inline]
     pub fn seek<'a>(&'a self, start: I, stop: I, cursor: &mut usize) -> IterFind<'a, I, T> {
-        if *cursor == 0 || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
-        {
-            *cursor = Self::lower_bound(
-                start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>),
-                &self.intervals,
-            );
-        }
+        if self.max_len_overflowed {
+            *cursor = self
+                .block_prefix_max_ends
+                .partition_point(|max_end| *max_end <= start)
+                * INDEX_BLOCK_SIZE;
+        } else {
+            let earliest_start = start
+                .checked_sub(&self.max_len)
+                .unwrap_or_else(I::min_value);
+            if *cursor == 0
+                || (*cursor < self.intervals.len() && self.intervals[*cursor].start > start)
+            {
+                *cursor = Self::lower_bound(earliest_start, &self.intervals);
+            }
 
-        while *cursor + 1 < self.intervals.len()
-            && self.intervals[*cursor + 1].start
-                < start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>)
-        {
-            *cursor += 1;
+            while *cursor + 1 < self.intervals.len()
+                && self.intervals[*cursor + 1].start < earliest_start
+            {
+                *cursor += 1;
+            }
         }
 
         IterFind {
             inner: self,
-            off: *cursor,
+            next_block_start: (*cursor / INDEX_BLOCK_SIZE) * INDEX_BLOCK_SIZE,
+            mask_block_start: 0,
+            mask: 0,
+            dense_next: 0,
+            dense_end: 0,
+            backend: detect_backend(),
             start,
             stop,
         }
@@ -684,36 +813,119 @@ where
 pub struct IterFind<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     inner: &'a Lapper<I, T>,
-    off: usize,
+    next_block_start: usize,
+    mask_block_start: usize,
+    mask: u32,
+    dense_next: usize,
+    dense_end: usize,
+    backend: MaskBackend,
     start: I,
     stop: I,
+}
+
+impl<'a, I, T> IterFind<'a, I, T>
+where
+    T: Eq + Clone + Send + Sync + 'a,
+    I: PrimInt + Ord + Clone + Send + Sync + 'static,
+{
+    #[inline(always)]
+    fn next_blockwise(&mut self) -> Option<&'a Interval<I, T>> {
+        loop {
+            // Return the next pending match from the dense branch.
+            if self.dense_next < self.dense_end {
+                let index = self.dense_next;
+                self.dense_next += 1;
+                return Some(&self.inner.intervals[index]);
+            }
+
+            // Return the next pending match from a mixed block's mask.
+            if self.mask != 0 {
+                let lane = self.mask.trailing_zeros() as usize;
+                self.mask &= self.mask - 1;
+                return Some(&self.inner.intervals[self.mask_block_start + lane]);
+            }
+
+            let block_start = self.next_block_start;
+            // No blocks remain, so there are no more matches.
+            if block_start >= self.inner.starts.len() {
+                return None;
+            }
+
+            // Private arrays are rebuilt together by constructors, mutations,
+            // and deserialization. Public interval edits cannot extend this bound.
+            // Starts are sorted, so no interval in this or a later block can match.
+            if unsafe { *self.inner.starts.get_unchecked(block_start) } >= self.stop {
+                return None;
+            }
+
+            let block = block_start / INDEX_BLOCK_SIZE;
+            // No ends in this block reach past the query start. Skip to the next
+            // block whose maximum end might match.
+            if unsafe { *self.inner.block_max_ends.get_unchecked(block) } <= self.start {
+                let next_block = unsafe { *self.inner.block_index.get_unchecked(block) };
+                debug_assert!(
+                    next_block <= self.inner.block_index.len(),
+                    "Lapper block index is corrupt"
+                );
+                self.next_block_start = next_block * INDEX_BLOCK_SIZE;
+                continue;
+            }
+
+            let block_end = (block_start + INDEX_BLOCK_SIZE).min(self.inner.starts.len());
+            // All ends match. Take the dense branch for the prefix whose starts
+            // are before the query stop.
+            if unsafe { *self.inner.block_min_ends.get_unchecked(block) } > self.start {
+                let starts = unsafe { self.inner.starts.get_unchecked(block_start..block_end) };
+                // If the last start matches, the whole block is dense. Otherwise,
+                // find the matching prefix.
+                let active_len = if unsafe { *starts.get_unchecked(starts.len() - 1) } < self.stop {
+                    starts.len()
+                } else {
+                    starts.partition_point(|lane_start| *lane_start < self.stop)
+                };
+                self.dense_next = block_start;
+                self.dense_end = block_start + active_len;
+                // Continue after a full block. A partial prefix means every later
+                // start is outside the query.
+                self.next_block_start = if active_len == starts.len() {
+                    block_end
+                } else {
+                    self.inner.starts.len()
+                };
+                continue;
+            }
+
+            // Some ends match. Build the exact overlap mask for this mixed block.
+            self.mask_block_start = block_start;
+            self.next_block_start = block_end;
+            self.mask = overlap_mask(
+                self.backend,
+                unsafe { self.inner.starts.get_unchecked(block_start..block_end) },
+                unsafe {
+                    self.inner
+                        .stops_by_start
+                        .get_unchecked(block_start..block_end)
+                },
+                self.start,
+                self.stop,
+            );
+        }
+    }
 }
 
 impl<'a, I, T> Iterator for IterFind<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync + 'static,
 {
     type Item = &'a Interval<I, T>;
 
     #[inline]
-    // interval.start < stop && interval.stop > start
     fn next(&mut self) -> Option<Self::Item> {
-        while self.off < self.inner.intervals.len() {
-            //let mut generator = self.inner.intervals[self.off..].iter();
-            //while let Some(interval) = generator.next() {
-            let interval = &self.inner.intervals[self.off];
-            self.off += 1;
-            if interval.overlap(self.start, self.stop) {
-                return Some(interval);
-            } else if interval.start >= self.stop {
-                break;
-            }
-        }
-        None
+        self.next_blockwise()
     }
 }
 
@@ -722,28 +934,30 @@ where
 pub struct IterDepth<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     inner: &'a Lapper<I, T>,
     merged: Lapper<I, bool>, // A lapper that is the merged_lapper of inner
     curr_merged_pos: I,      // Current start position in current interval
-    curr_pos: usize,         // In merged list of non-overlapping intervals
-    cursor: usize,           // cursor for seek over inner lapper
-    end: usize,              // len of merged
+    initialized: bool,
+    curr_pos: usize, // In merged list of non-overlapping intervals
+    cursor: usize,   // cursor for seek over inner lapper
+    end: usize,      // len of merged
 }
 
 impl<'a, I, T> Iterator for IterDepth<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync + 'static,
 {
     type Item = Interval<I, I>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let mut interval: &Interval<I, bool> = &self.merged.intervals[self.curr_pos];
-        if self.curr_merged_pos == zero::<I>() {
+        if !self.initialized {
             self.curr_merged_pos = interval.start;
+            self.initialized = true;
         }
         if interval.stop == self.curr_merged_pos {
             if self.curr_pos + 1 != self.end {
@@ -766,6 +980,9 @@ where
         let mut new_depth_at_point = depth_at_point;
         while new_depth_at_point == depth_at_point && self.curr_merged_pos < interval.stop {
             self.curr_merged_pos = self.curr_merged_pos + one::<I>();
+            if self.curr_merged_pos == interval.stop {
+                break;
+            }
             new_depth_at_point = self
                 .inner
                 .seek(
@@ -786,7 +1003,7 @@ where
 pub struct IterLapper<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     inner: &'a Lapper<I, T>,
     pos: usize,
@@ -795,7 +1012,7 @@ where
 impl<'a, I, T> Iterator for IterLapper<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
 
@@ -812,7 +1029,7 @@ where
 impl<I, T> IntoIterator for Lapper<I, T>
 where
     T: Eq + Clone + Send + Sync,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     type Item = Interval<I, T>;
     type IntoIter = ::std::vec::IntoIter<Self::Item>;
@@ -825,7 +1042,7 @@ where
 impl<'a, I, T> IntoIterator for &'a Lapper<I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
     type IntoIter = std::slice::Iter<'a, Interval<I, T>>;
@@ -838,7 +1055,7 @@ where
 impl<'a, I, T> IntoIterator for &'a mut Lapper<I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Ord + Clone + Send + Sync,
 {
     type Item = &'a mut Interval<I, T>;
     type IntoIter = std::slice::IterMut<'a, Interval<I, T>>;
@@ -1363,7 +1580,7 @@ mod tests {
     }
 
     // When there is a very long interval that spans many little intervals, test that the little
-    // intevals still get returne properly
+    // Intervals still get returned properly.
     #[test]
     fn test_bad_skips() {
         let data = vec![
@@ -1385,8 +1602,19 @@ mod tests {
     }
 
     #[cfg(feature = "with_serde")]
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct LegacyLapper {
+        intervals: Vec<Iv>,
+        starts: Vec<usize>,
+        stops: Vec<usize>,
+        max_len: usize,
+        cov: Option<usize>,
+        overlaps_merged: bool,
+    }
+
+    #[cfg(feature = "with_serde")]
     #[test]
-    fn serde_test() {
+    fn serde_keeps_the_v1_six_field_representation() {
         let data = vec![
             Iv{start:25264912, stop: 25264986, val: 0},
             Iv{start:27273024, stop: 27273065	, val: 0},
@@ -1398,14 +1626,26 @@ mod tests {
         ];
         let lapper = Lapper::new(data);
 
-        let serialized = bincode::serialize(&lapper).unwrap();
-        let deserialzed: Lapper<usize, u32> = bincode::deserialize(&serialized).unwrap();
+        let legacy = LegacyLapper {
+            intervals: lapper.intervals.clone(),
+            starts: lapper.starts.clone(),
+            stops: lapper.stops.clone(),
+            max_len: lapper.max_len,
+            cov: lapper.cov,
+            overlaps_merged: lapper.overlaps_merged,
+        };
+        let legacy_bytes = bincode::serialize(&legacy).unwrap();
+        let deserialized: Lapper<usize, u32> = bincode::deserialize(&legacy_bytes).unwrap();
+        let current_bytes = bincode::serialize(&deserialized).unwrap();
+        assert_eq!(current_bytes, legacy_bytes);
+        let legacy_again: LegacyLapper = bincode::deserialize(&current_bytes).unwrap();
+        assert_eq!(legacy_again, legacy);
 
-        let found = deserialzed.find(28974798, 33141355).collect::<Vec<&Iv>>();
+        let found = deserialized.find(28974798, 33141355).collect::<Vec<&Iv>>();
         assert_eq!(found, vec![
             &Iv{start:28866309, stop: 33141404	, val: 0},
         ]);
-        assert_eq!(deserialzed.count(28974798, 33141355), 1);
+        assert_eq!(deserialized.count(28974798, 33141355), 1);
     }
 
 }
