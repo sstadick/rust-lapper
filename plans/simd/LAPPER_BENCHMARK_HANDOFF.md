@@ -26,9 +26,9 @@ especially the pathological `7-3` case?
 - Release flags: `RUSTFLAGS="-C target-cpu=native"`.
 - Release profile: thin LTO and one code-generation unit.
 
-The later local 2.0.0 release-preparation edits change metadata, documentation,
-tests, and development dependencies, not the measured query implementation, so
-`0eeeafd` is the correct reproducible performance revision.
+The later local 2.0.0-beta.1 release-preparation edits change metadata,
+documentation, tests, and development dependencies, not the measured query
+implementation, so `0eeeafd` is the correct reproducible performance revision.
 
 Prefer a physical x86-64 host with AVX2. Record `lscpu`, OS/kernel, rustc
 version, and the full build flags. Before timing the candidate, verify dispatch:

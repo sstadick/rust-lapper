@@ -1,12 +1,12 @@
 # Portable SIMD index production plan
 
-All five production gates in this retained decision record are complete.
+The five implementation checks below are complete. A short beta is the
+remaining step before 2.0.0.
 
-The implementation on `worked/portable-simd-index` is feature-complete for
-rust-lapper 2.0. Productionization is limited to the five gates below; changes
-preserve forward borrowed iteration order, exact overlap semantics, and the
-always-on query algorithm. The accepted `I: 'static` bound is the intentional
-major-version API change.
+The implementation on `worked/portable-simd-index` is ready for
+2.0.0-beta.1. It preserves forward borrowed iteration order, exact overlap
+semantics, and the always-on query algorithm. The accepted `I: 'static` bound
+is the intentional major-version API change.
 
 ## 1. Validate AVX2 on native x86-64 hardware
 
@@ -117,3 +117,18 @@ scalar-only i686, PowerPC64LE, and Wasm compilation.
 
 Pass condition: every supported target and feature combination is green, with
 native execution for the SIMD backends claimed by the release.
+
+## 6. Run the beta
+
+Status: pending.
+
+- Publish `2.0.0-beta.1` and confirm the crate installs from crates.io.
+- Confirm that docs.rs builds the beta documentation.
+- Ask downstream users to compile and test against the beta explicitly.
+- Leave the beta open for one or two weeks for correctness and compatibility
+  reports.
+- Promote the tested code to `2.0.0` if no blockers appear. Publish
+  `2.0.0-beta.2` instead if the beta requires code changes.
+
+Pass condition: the published crate and documentation work, downstream builds
+pass, and there are no unresolved correctness or compatibility issues.

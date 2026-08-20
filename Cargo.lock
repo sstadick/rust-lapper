@@ -310,7 +310,7 @@ checksum = "f162c6dd7b008981e4d40210aca20b4bd0f9b60ca9271061b07f78537722f2e1"
 
 [[package]]
 name = "rust-lapper"
-version = "2.0.0"
+version = "2.0.0-beta.1"
 dependencies = [
  "bincode",
  "criterion",

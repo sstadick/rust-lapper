@@ -9,6 +9,9 @@
 [Documentation](https://docs.rs/rust-lapper)
 [Crates.io](https://crates.io/crates/rust-lapper)
 
+rust-lapper 2 is currently in beta. To try it, use `2.0.0-beta.1`
+explicitly; Cargo will not select it from a `version = "2"` requirement.
+
 This was originally a Rust port of Brent Pedersen's
 [nim-lapper](https://github.com/brentp/nim-lapper). `find()` and `seek()` return
 lazy borrowed iterators in ascending start order, so normal iterator adaptors
@@ -71,7 +74,7 @@ safe.
 
 ```toml
 [dependencies]
-rust-lapper = { version = "2", features = ["with_serde"] }
+rust-lapper = { version = "2.0.0-beta.1", features = ["with_serde"] }
 ```
 
 See `examples/serde.rs` for a brief example.
@@ -226,9 +229,9 @@ fn main() {
 
 ## Release Notes
 
-- `2.0.0`: Replace the longest-interval scan with a portable SIMD block index,
-  add signed coordinates, declare Rust 1.59 as the MSRV, and accept the
-  `I: 'static` coordinate bound.
+- `2.0.0-beta.1`: Begin the rust-lapper 2 beta with a portable SIMD block
+  index, signed coordinates, Rust 1.59 as the MSRV, and the `I: 'static`
+  coordinate bound.
 - `1.3.0`: Add the `sort_unstable` feature flag for allocation-sensitive sorting thanks to @jameslkingsley.
 - `1.1.0`: Added insert functionality thanks to @zaporter
 - `1.0.0`: Add serde support via the `with_serde` feature flag
