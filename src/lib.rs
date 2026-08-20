@@ -1,28 +1,59 @@
-//! A compact data structure for fast interval overlap queries.
-//!
+//! This module provides a simple data structure for fast interval searches.
 //! ## Features
-//!
-//! - Lazy, borrowed `find()` and `seek()` iterators in ascending start order.
-//! - A fixed 32-interval block index that handles both ordinary data and long
-//!   intervals that engulf many shorter intervals.
-//! - NEON mixed-block masks on AArch64, runtime-detected AVX2 on x86-64, and an
-//!   exact scalar fallback on other targets and coordinate types.
-//! - An overlap-count method based on the
+//! - Extremely fast overlap queries on both ordinary genomic datasets and
+//!   datasets with long intervals that engulf many shorter intervals.
+//! - Extremely fast in order queries through the cursor-based `seek()` method.
+//! - Extremely fast intersection counts based on the
 //!   [BITS](https://arxiv.org/pdf/1208.3407.pdf) algorithm
-//! - Immutable, parallel-friendly queries. `seek()` keeps its query cursor
-//!   outside the shared structure.
+//! - NEON acceleration on AArch64, runtime-detected AVX2 on x86-64, and an exact
+//!   scalar fallback everywhere else.
+//! - Parallel friendly. Queries are on an immutable structure, even for `seek()`.
+//! - Consumer / Adapter paradigm. Iterators are returned and serve as the main
+//!   API for interacting with the Lapper.
 //!
-//! ## Range semantics
+//! ## Details:
 //!
-//! Stored intervals and query ranges are half-open: `[start, stop)`. Two ranges
-//! overlap exactly when `interval.start < query.stop` and
-//! `interval.stop > query.start`. Adjacent ranges such as `[0, 10)` and
-//! `[10, 20)` do not overlap.
+//! ```text
+//!          0  1  2  3  4  5  6  7  8  9  10 11
+//! [0, 10)  X  X  X  X  X  X  X  X  X  X
+//! [2, 5)         X  X  X
+//! [3, 8)            X  X  X  X  X
+//! [3, 8)            X  X  X  X  X
+//! [3, 8)            X  X  X  X  X
+//! [3, 8)            X  X  X  X  X
+//! [5, 9)                  X  X  X  X
+//! [8, 11)                          X  X  X
 //!
-//! Most interaction with this crate is through [`Lapper`]. Use
-//! [`Lapper::find`] for independent queries, [`Lapper::seek`] for queries
-//! arriving in sorted start order, and [`Lapper::count`] when only the number
+//! Query:  [8, 11)
+//! Answer: [0, 10), [5, 9), [8, 11)
+//! ```
+//!
+//! Most interaction with this crate will be through the [`Lapper`] struct. The
+//! main methods are [`Lapper::find`], [`Lapper::seek`], and [`Lapper::count`].
+//! `find()` handles independent queries, `seek()` reuses a caller-owned cursor
+//! when query starts arrive in order, and `count()` is used when only the number
 //! of overlaps is needed.
+//!
+//! Ranges are half-open: `[start, stop)`. Two ranges overlap when
+//! `interval.start < query.stop` and `interval.stop > query.start`, so adjacent
+//! ranges such as `[0, 10)` and `[10, 20)` do not overlap. This matches the
+//! usual zero-based genomic coordinate system. Signed and unsigned primitive
+//! coordinates are supported.
+//!
+//! Lapper does not use an interval tree. It keeps intervals sorted by start and
+//! builds a small index over fixed blocks of 32 intervals. A prefix maximum
+//! finds the first block that could overlap; each block's minimum and maximum
+//! end positions then prove whether the block is a miss or a dense prefix, and
+//! a next-greater link skips runs of blocks that cannot overlap. Mixed blocks
+//! produce an exact 32-bit overlap mask with NEON, AVX2, or the scalar fallback.
+//! Mask bits are drained from low to high, so results remain borrowed and in
+//! ascending start order.
+//!
+//! The same block algorithm handles ordinary data and the old worst case where
+//! one long interval engulfs many shorter intervals. There is no workload mode
+//! to configure. `merge_overlaps()` remains useful when callers want merged
+//! coverage, while `count()` remains the independent BITS implementation and is
+//! fast regardless of interval shape.
 //!
 //! # Examples
 //!
