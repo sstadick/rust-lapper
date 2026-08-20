@@ -834,12 +834,14 @@ where
     #[inline(always)]
     fn next_blockwise(&mut self) -> Option<&'a Interval<I, T>> {
         loop {
+            // Return the next pending match from the dense branch.
             if self.dense_next < self.dense_end {
                 let index = self.dense_next;
                 self.dense_next += 1;
                 return Some(&self.inner.intervals[index]);
             }
 
+            // Return the next pending match from a mixed block's mask.
             if self.mask != 0 {
                 let lane = self.mask.trailing_zeros() as usize;
                 self.mask &= self.mask - 1;
@@ -847,17 +849,21 @@ where
             }
 
             let block_start = self.next_block_start;
+            // No blocks remain, so there are no more matches.
             if block_start >= self.inner.starts.len() {
                 return None;
             }
 
             // Private arrays are rebuilt together by constructors, mutations,
             // and deserialization. Public interval edits cannot extend this bound.
+            // Starts are sorted, so no interval in this or a later block can match.
             if unsafe { *self.inner.starts.get_unchecked(block_start) } >= self.stop {
                 return None;
             }
 
             let block = block_start / INDEX_BLOCK_SIZE;
+            // No ends in this block reach past the query start. Skip to the next
+            // block whose maximum end might match.
             if unsafe { *self.inner.block_max_ends.get_unchecked(block) } <= self.start {
                 let next_block = unsafe { *self.inner.block_index.get_unchecked(block) };
                 debug_assert!(
@@ -869,8 +875,12 @@ where
             }
 
             let block_end = (block_start + INDEX_BLOCK_SIZE).min(self.inner.starts.len());
+            // All ends match. Take the dense branch for the prefix whose starts
+            // are before the query stop.
             if unsafe { *self.inner.block_min_ends.get_unchecked(block) } > self.start {
                 let starts = unsafe { self.inner.starts.get_unchecked(block_start..block_end) };
+                // If the last start matches, the whole block is dense. Otherwise,
+                // find the matching prefix.
                 let active_len = if unsafe { *starts.get_unchecked(starts.len() - 1) } < self.stop {
                     starts.len()
                 } else {
@@ -878,6 +888,8 @@ where
                 };
                 self.dense_next = block_start;
                 self.dense_end = block_start + active_len;
+                // Continue after a full block. A partial prefix means every later
+                // start is outside the query.
                 self.next_block_start = if active_len == starts.len() {
                     block_end
                 } else {
@@ -886,6 +898,7 @@ where
                 continue;
             }
 
+            // Some ends match. Build the exact overlap mask for this mixed block.
             self.mask_block_start = block_start;
             self.next_block_start = block_end;
             self.mask = overlap_mask(
