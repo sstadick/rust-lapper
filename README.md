@@ -9,7 +9,7 @@
 [Documentation](https://docs.rs/rust-lapper)
 [Crates.io](https://crates.io/crates/rust-lapper)
 
-This is a Rust port of Brent Pedersen's
+This was originally a Rust port of Brent Pedersen's
 [nim-lapper](https://github.com/brentp/nim-lapper). `find()` and `seek()` return
 lazy borrowed iterators in ascending start order, so normal iterator adaptors
 work without collecting results first.

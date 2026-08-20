@@ -2,7 +2,7 @@
 
 > This is a reproducibility record for the exact pre-release benchmark commit
 > named below, not current installation or API guidance. The release-facing
-> summary lives in `README.md`.
+> summary lives in [`README.md`](../../README.md).
 
 ## Objective
 
