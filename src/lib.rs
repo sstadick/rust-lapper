@@ -135,9 +135,15 @@ where
     stops: Vec<I>,
     /// End positions in the same order as `intervals`, for block-mask queries.
     stops_by_start: Vec<I>,
+    /// Index of the next block with a strictly larger maximum end, or the
+    /// number of blocks when no such block exists.
     block_index: Vec<usize>,
+    /// Maximum end position in each fixed-size block.
     block_max_ends: Vec<I>,
+    /// Minimum end position in each fixed-size block.
     block_min_ends: Vec<I>,
+    /// Inclusive prefix maximum of `block_max_ends`, used to find the first
+    /// candidate block for a query.
     block_prefix_max_ends: Vec<I>,
     /// The length of the longest interval
     max_len: I,
