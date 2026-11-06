@@ -9,8 +9,7 @@
 [Documentation](https://docs.rs/rust-lapper)
 [Crates.io](https://crates.io/crates/rust-lapper)
 
-rust-lapper 2 is currently in beta. To try it, use `2.0.0-beta.1`
-explicitly; Cargo will not select it from a `version = "2"` requirement.
+rust-lapper 2 is stable. Add `rust-lapper = "2"` to your dependencies.
 
 This was originally a Rust port of Brent Pedersen's
 [nim-lapper](https://github.com/brentp/nim-lapper). `find()` and `seek()` return
@@ -74,7 +73,7 @@ safe.
 
 ```toml
 [dependencies]
-rust-lapper = { version = "2.0.0-beta.1", features = ["with_serde"] }
+rust-lapper = { version = "2", features = ["with_serde"] }
 ```
 
 See `examples/serde.rs` for a brief example.
@@ -229,6 +228,9 @@ fn main() {
 
 ## Release Notes
 
+- `2.0.0`: Promote `2.0.0-beta.1` to stable with no implementation changes.
+  Includes the portable SIMD block index and signed-coordinate support.
+  Requires Rust 1.59 or newer and the `I: 'static` coordinate bound.
 - `2.0.0-beta.1`: Begin the rust-lapper 2 beta with a portable SIMD block
   index, signed coordinates, Rust 1.59 as the MSRV, and the `I: 'static`
   coordinate bound.
