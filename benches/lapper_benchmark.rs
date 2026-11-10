@@ -77,6 +77,50 @@ fn make_non_overlapping(n: usize) -> Vec<Iv> {
         .collect()
 }
 
+/// One interval that spans `n` short disjoint intervals. Every query inside
+/// the span starts at the first block and has to skip to the blocks near it.
+fn make_spanned_disjoint(n: usize) -> Vec<Iv> {
+    let mut result: Vec<Iv> = (0..n as u32)
+        .map(|i| Interval {
+            start: i * 100,
+            stop: i * 100 + 50,
+            val: false,
+        })
+        .collect();
+    result.push(Interval {
+        start: 0,
+        stop: n as u32 * 100,
+        val: false,
+    });
+    result
+}
+
+pub fn skips(c: &mut Criterion) {
+    let n = 100_000;
+    let lapper = Lapper::new(make_spanned_disjoint(n));
+    let mut queries = make_random_seeded(1_000, n as u32 * 100, 120, 121, 7);
+    queries.sort();
+
+    let mut group = c.benchmark_group("Skips");
+    group.throughput(Throughput::Elements(queries.len() as u64));
+    group.bench_function("find under an interval spanning disjoint intervals", |b| {
+        b.iter(|| {
+            for x in queries.iter() {
+                black_box(lapper.find(x.start, x.stop).count());
+            }
+        });
+    });
+    group.bench_function("seek under an interval spanning disjoint intervals", |b| {
+        b.iter(|| {
+            let mut cursor = 0;
+            for x in queries.iter() {
+                black_box(lapper.seek(x.start, x.stop, &mut cursor).count());
+            }
+        });
+    });
+    group.finish();
+}
+
 pub fn query(c: &mut Criterion) {
     let (intervals, other_intervals) = make_interval_set();
     // Make Lapper intervals
@@ -226,5 +270,5 @@ pub fn construction(c: &mut Criterion) {
     construction_group.finish();
 }
 
-criterion_group!(benches, query, construction);
+criterion_group!(benches, query, skips, construction);
 criterion_main!(benches);
