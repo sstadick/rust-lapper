@@ -8,7 +8,7 @@ or alternate public query method.
 The implementation keeps one canonical start-sorted interval vector and adds
 fixed 32-entry block facts:
 
-- a maximum end and a next-greater-block link for exact forward skips;
+- a max tree over block maximum ends for exact forward skips;
 - a minimum end for an exact all-ends-pass route;
 - a prefix maximum for finding the first possible block;
 - ends in start order for mixed-block masks.

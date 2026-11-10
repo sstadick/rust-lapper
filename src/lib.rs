@@ -40,20 +40,27 @@
 //! usual zero-based genomic coordinate system. Signed and unsigned primitive
 //! coordinates are supported.
 //!
-//! Lapper does not use an interval tree. It keeps intervals sorted by start and
-//! builds a small index over fixed blocks of 32 intervals. A prefix maximum
-//! finds the first block that could overlap; each block's minimum and maximum
-//! end positions then prove whether the block is a miss or a dense prefix, and
-//! a next-greater link skips runs of blocks that cannot overlap. Mixed blocks
-//! produce an exact 32-bit overlap mask with NEON, AVX2, or the scalar fallback.
-//! Mask bits are drained from low to high, so results remain borrowed and in
-//! ascending start order.
+//! ## How queries work
 //!
-//! The same block algorithm handles ordinary data and the old worst case where
-//! one long interval engulfs many shorter intervals. There is no workload mode
-//! to configure. `merge_overlaps()` remains useful when callers want merged
-//! coverage, while `count()` remains the independent BITS implementation and is
-//! fast regardless of interval shape.
+//! Lapper keeps its intervals in one vector sorted by start and indexes that
+//! vector in fixed blocks of 32 intervals:
+//!
+//! - A prefix maximum over the blocks' end positions finds the first block that
+//!   could overlap a query.
+//! - Each block's minimum and maximum end positions prove whether the whole
+//!   block misses or every end in it passes. When every end passes, only the
+//!   sorted starts decide which intervals match.
+//! - A binary max tree over the blocks' maximum end positions lets a query
+//!   jump over a run of blocks that cannot overlap, in time logarithmic in the
+//!   length of the run.
+//! - A block with mixed ends produces an exact 32-bit overlap mask with NEON,
+//!   AVX2, or the scalar fallback. Mask bits are drained from low to high.
+//!
+//! Results are borrowed from the interval vector and yielded in ascending start
+//! order. The same algorithm handles ordinary data and data where long
+//! intervals engulf many shorter ones, so there is no workload mode to
+//! configure. `count()` is an independent BITS implementation that is fast
+//! regardless of interval shape.
 //!
 //! # Examples
 //!
@@ -135,15 +142,19 @@ where
     stops: Vec<I>,
     /// End positions in the same order as `intervals`, for block-mask queries.
     stops_by_start: Vec<I>,
-    /// Index of the next block with a strictly larger maximum end, or the
-    /// number of blocks when no such block exists.
-    block_index: Vec<usize>,
-    /// Maximum end position in each fixed-size block.
-    block_max_ends: Vec<I>,
+    /// Binary max tree over the maximum end position of each fixed-size block.
+    ///
+    /// Node 1 is the root and node `i` has children `2 * i` and `2 * i + 1`.
+    /// The leaf for block `b` is node `block_tree_leaves + b`; leaves past the
+    /// last block hold `I::min_value()`, which no query start is below.
+    block_max_tree: Vec<I>,
+    /// Number of leaves in `block_max_tree`: the block count rounded up to a
+    /// power of two.
+    block_tree_leaves: usize,
     /// Minimum end position in each fixed-size block.
     block_min_ends: Vec<I>,
-    /// Inclusive prefix maximum of `block_max_ends`, used to find the first
-    /// candidate block for a query.
+    /// Inclusive prefix maximum of the block maximum ends, used to find the
+    /// first candidate block for a query.
     block_prefix_max_ends: Vec<I>,
     /// The length of the longest interval
     max_len: I,
@@ -293,8 +304,8 @@ where
             starts: Vec::new(),
             stops: Vec::new(),
             stops_by_start: Vec::new(),
-            block_index: Vec::new(),
-            block_max_ends: Vec::new(),
+            block_max_tree: Vec::new(),
+            block_tree_leaves: 0,
             block_min_ends: Vec::new(),
             block_prefix_max_ends: Vec::new(),
             max_len: zero::<I>(),
@@ -332,44 +343,74 @@ where
         #[cfg(not(feature = "sort_unstable"))]
         self.stops.sort();
 
-        self.block_max_ends.clear();
         self.block_min_ends.clear();
         let interval_count = self.intervals.len();
         let block_count =
             interval_count / INDEX_BLOCK_SIZE + usize::from(interval_count % INDEX_BLOCK_SIZE != 0);
-        self.block_max_ends.reserve(block_count);
+        let leaves = block_count.next_power_of_two();
+        self.block_tree_leaves = leaves;
+        self.block_max_tree.clear();
+        self.block_max_tree.resize(2 * leaves, I::min_value());
         self.block_min_ends.reserve(block_count);
-        for block in self.intervals.chunks(INDEX_BLOCK_SIZE) {
-            let mut max_end = block[0].stop;
+        for (block, intervals) in self.intervals.chunks(INDEX_BLOCK_SIZE).enumerate() {
+            let mut max_end = intervals[0].stop;
             let mut min_end = max_end;
-            for interval in &block[1..] {
+            for interval in &intervals[1..] {
                 max_end = std::cmp::max(max_end, interval.stop);
                 min_end = std::cmp::min(min_end, interval.stop);
             }
-            self.block_max_ends.push(max_end);
+            self.block_max_tree[leaves + block] = max_end;
             self.block_min_ends.push(min_end);
         }
-
-        self.block_index.clear();
-        self.block_index.resize(block_count, block_count);
-        let mut stack = Vec::<usize>::new();
-        for block in (0..block_count).rev() {
-            while stack.last().map_or(false, |&next| {
-                self.block_max_ends[next] <= self.block_max_ends[block]
-            }) {
-                stack.pop();
-            }
-            self.block_index[block] = stack.last().copied().unwrap_or(block_count);
-            stack.push(block);
+        for node in (1..leaves).rev() {
+            self.block_max_tree[node] = std::cmp::max(
+                self.block_max_tree[2 * node],
+                self.block_max_tree[2 * node + 1],
+            );
         }
 
-        self.block_prefix_max_ends.clone_from(&self.block_max_ends);
+        self.block_prefix_max_ends.clear();
+        self.block_prefix_max_ends
+            .extend_from_slice(&self.block_max_tree[leaves..leaves + block_count]);
         for block in 1..block_count {
             self.block_prefix_max_ends[block] = std::cmp::max(
                 self.block_prefix_max_ends[block - 1],
                 self.block_prefix_max_ends[block],
             );
         }
+    }
+
+    /// Index of the first block after `block` whose maximum end is greater
+    /// than `start`, or a value of at least the block count when there is none.
+    ///
+    /// Climbs from the block's leaf until a subtree to the right holds an end
+    /// past `start`, then descends to the leftmost such leaf. The cost is
+    /// logarithmic in the distance skipped.
+    ///
+    /// This stays out of line so that the iterator's `next` remains small
+    /// enough to inline into adapters such as `count()`.
+    #[inline(never)]
+    fn next_block_above(&self, block: usize, start: I) -> usize {
+        let tree = self.block_max_tree.as_slice();
+        let leaves = self.block_tree_leaves;
+        let mut node = leaves + block;
+        loop {
+            // A left child's sibling covers the blocks right after it. After a
+            // right child, the next blocks belong to the parent's sibling.
+            if node & 1 == 0 && tree[node + 1] > start {
+                node += 1;
+                break;
+            }
+            node >>= 1;
+            if node <= 1 {
+                return leaves;
+            }
+        }
+        while node < leaves {
+            node *= 2;
+            node += usize::from(tree[node] <= start);
+        }
+        node - leaves
     }
 
     /// Insert a new interval after the Lapper has been created. This is very
@@ -794,9 +835,17 @@ where
             }
         }
 
+        // The root of the max tree holds the largest end. When no interval ends
+        // after the query start there is nothing to find.
+        let next_block_start = if self.block_max_tree[1] <= start {
+            self.starts.len()
+        } else {
+            (*cursor / INDEX_BLOCK_SIZE) * INDEX_BLOCK_SIZE
+        };
+
         IterFind {
             inner: self,
-            next_block_start: (*cursor / INDEX_BLOCK_SIZE) * INDEX_BLOCK_SIZE,
+            next_block_start,
             mask_block_start: 0,
             mask: 0,
             dense_next: 0,
@@ -834,18 +883,20 @@ where
     #[inline(always)]
     fn next_blockwise(&mut self) -> Option<&'a Interval<I, T>> {
         loop {
-            // Return the next pending match from the dense branch.
-            if self.dense_next < self.dense_end {
-                let index = self.dense_next;
-                self.dense_next += 1;
+            // Return the next pending match from the dense branch or from a
+            // mixed block's mask. Both share one bounds-checked return, which
+            // keeps this function small enough to inline into adapters.
+            let pending_dense = self.dense_next < self.dense_end;
+            if pending_dense || self.mask != 0 {
+                let index = if pending_dense {
+                    self.dense_next += 1;
+                    self.dense_next - 1
+                } else {
+                    let lane = self.mask.trailing_zeros() as usize;
+                    self.mask &= self.mask - 1;
+                    self.mask_block_start + lane
+                };
                 return Some(&self.inner.intervals[index]);
-            }
-
-            // Return the next pending match from a mixed block's mask.
-            if self.mask != 0 {
-                let lane = self.mask.trailing_zeros() as usize;
-                self.mask &= self.mask - 1;
-                return Some(&self.inner.intervals[self.mask_block_start + lane]);
             }
 
             let block_start = self.next_block_start;
@@ -863,14 +914,11 @@ where
 
             let block = block_start / INDEX_BLOCK_SIZE;
             // No ends in this block reach past the query start. Skip to the next
-            // block whose maximum end might match.
-            if unsafe { *self.inner.block_max_ends.get_unchecked(block) } <= self.start {
-                let next_block = unsafe { *self.inner.block_index.get_unchecked(block) };
-                debug_assert!(
-                    next_block <= self.inner.block_index.len(),
-                    "Lapper block index is corrupt"
-                );
-                self.next_block_start = next_block * INDEX_BLOCK_SIZE;
+            // block with an end that does.
+            let leaf = self.inner.block_tree_leaves + block;
+            if unsafe { *self.inner.block_max_tree.get_unchecked(leaf) } <= self.start {
+                self.next_block_start =
+                    self.inner.next_block_above(block, self.start) * INDEX_BLOCK_SIZE;
                 continue;
             }
 

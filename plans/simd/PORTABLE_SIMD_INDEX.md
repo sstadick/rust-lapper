@@ -56,10 +56,11 @@ not reorder that vector. Construction derives:
 | `starts` | `n` | Start binary searches and SIMD input |
 | `stops` | `n` | Globally sorted ends for `count()` |
 | `stops_by_start` | `n` | End paired with each start for a mask lane |
-| `block_max_ends` | `ceil(n / 32)` | Prove a whole block misses |
+| `block_max_tree` | `2 * leaves` | Prove a whole block misses and find the next block that does not |
 | `block_min_ends` | `ceil(n / 32)` | Prove every active lane's end passes |
-| `block_index` | `ceil(n / 32)` | Next block to the right with a greater maximum end |
 | `block_prefix_max_ends` | `ceil(n / 32)` | Binary-search the first possible block |
+
+`leaves` is the block count rounded up to a power of two.
 
 The block size remains 32. It maps one block result to one `u32` mask, amortizes
 metadata, and was the best compromise across the measured sparse and dense cases.
@@ -67,21 +68,45 @@ Making SIMD lanes wider changes how quickly a mixed block is classified; it does
 not remove the metadata, output, and partial-block tradeoffs that made 64-entry
 blocks regress in an earlier trial.
 
-`block_index` is built with a reverse monotonic stack. If block `b` has
-`max_end <= query.start`, its link points to the first later block with a strictly
-greater maximum. Every skipped intermediate block has a maximum no greater than
-block `b`, so all of them are also exact misses.
+`block_max_tree` is an implicit binary max tree over the blocks' maximum ends.
+Node 1 is the root, node `i` has children `2 * i` and `2 * i + 1`, and the leaf
+for block `b` is node `leaves + b`. Leaves past the last block hold
+`I::min_value()`, which is never greater than a query start.
+
+```text
+blocks:            0    1    2    3    4    5   (6 and 7 are padding)
+maximum ends:     90   21   22   23   24   25
+
+node 1                           90
+nodes 2-3              90                  25
+nodes 4-7         90        23        25       min
+nodes 8-15      90  21    22  23    24  25   min min
+```
+
+If block `b` has `max_end <= query.start`, `next_block_above()` finds the first
+later block whose maximum end is greater than `query.start`. It climbs from the
+leaf of `b`. Each time the path leaves a left child, the sibling to the right
+covers the blocks that come next, so the walk tests that sibling's maximum. At
+the first sibling that passes, it descends to the leftmost passing leaf. Every
+block passed over lies in a subtree whose maximum is at most `query.start`, so
+all of them are exact misses. When the climb reaches the root, no later block
+can match and the walk returns `leaves`, which ends the iterator.
+
+A skip over `d` blocks costs `O(log d)` node reads whatever the order of the
+maximum ends. In the example, a query starting at 23 that has reached block 1
+reads nodes 5, 3, 6, and 12 and lands on block 4.
 
 ## One always-on traversal
 
 `find()` binary-searches `block_prefix_max_ends` to skip the leading prefix whose
-intervals all end at or before `query.start`. `seek()` retains its cursor behavior,
-then rounds the candidate position down to its containing 32-entry block. The
-normal block loop has three exact routes:
+intervals all end at or before `query.start`. `seek()` advances its cursor, then
+rounds the candidate position down to its containing 32-entry block; it returns
+an empty iterator when the tree root shows that no interval ends after
+`query.start`. The block loop has three exact routes:
 
 ```text
 block.max_end <= query.start
-    -> all 32 miss; follow the next-greater block link
+    -> all 32 miss; walk the max tree to the next block that does not
 
 block.min_end > query.start
     -> every end passes; return starts < query.stop as a dense prefix
@@ -116,8 +141,8 @@ return Some(&self.inner.intervals[self.mask_block_start + lane]);
 ```
 
 The lowest bit is the lowest position in the start-sorted block. Blocks are only
-visited to the right, dense prefixes are walked from their first item, and skip
-links only point right. Therefore results remain references into the canonical
+visited to the right, dense prefixes are walked from their first item, and
+skips only move right. Therefore results remain references into the canonical
 vector in ascending start order. SIMD changes how a block answer is calculated,
 not the observable traversal identity.
 
@@ -246,15 +271,18 @@ invariant boundary:
 1. `block_start < starts.len()` is checked.
 2. Constructors, supported mutation, and deserialization rebuild `starts` and
    `stops_by_start` to equal lengths.
-3. They also build one entry in every block metadata vector for each 32-entry
-   start block.
+3. They also build one entry in `block_min_ends` and `block_prefix_max_ends`
+   for each 32-entry start block.
 4. `block_end` is clamped to `starts.len()`.
-5. A link is either a valid later block or the block-count sentinel.
+5. `block_max_tree` holds `2 * leaves` nodes and `leaves` is at least the block
+   count, so the leaf `leaves + block` of a valid block is in bounds.
 
-The block link is guarded by a debug assertion. Returned `intervals` remain
-safely indexed, so unsupported direct edits to the public vector can at worst
-produce stale behavior or a panic, not turn a result yield into unchecked memory
-access. Directly appending to `intervals` is ignored by the private derived bound;
+Only that leaf read is unchecked. The tree walk uses checked indexing; it runs
+once per skip rather than once per block, and it returns either a later block
+or `leaves`, whose start position is at least `starts.len()`. Returned
+`intervals` remain safely indexed, so unsupported direct edits to the public
+vector can at worst produce stale behavior or a panic, not turn a result yield
+into unchecked memory access. Directly appending to `intervals` is ignored by the private derived bound;
 supported mutation must continue to use `insert()` or `merge_overlaps()`.
 
 For the specialized AArch64 query, this change reduced the inlined function from
@@ -311,7 +339,8 @@ performance cases; those results follow the original AArch64 record below.
 ## Performance record
 
 All times below are medians in milliseconds. Totals combine independently
-reported build and query medians.
+reported build and query medians. The tables record commit `0eeeafd`, the
+2.0.0 query implementation.
 
 ### Apple M3 AArch64
 
@@ -392,7 +421,7 @@ This conclusion is structural, not based on names such as "maximum end."
 
 | Implementation | Canonical layout | Index shape | Query direction / state |
 |---|---|---|---|
-| This Lapper | One vector sorted by start | Fixed positional block summaries and forward next-greater links | Forward blocks; query-local low-bit-first mask |
+| This Lapper | One vector sorted by start | Fixed positional block summaries and a max tree over block maximum ends | Forward blocks; query-local low-bit-first mask |
 | AIList | Intervals decomposed into multiple containment-derived lists | Per-list running maximum ends | Searches/scans each component backward |
 | NCList | Intervals organized by containment | Nested containment hierarchy | Hierarchical sublist traversal |
 | SuperIntervals | Separate starts, ends, payloads, and branch arrays | Previous-greater/equal end links | Begins near the query boundary and follows links backward |

@@ -17,25 +17,25 @@ lazy borrowed iterators in ascending start order, so normal iterator adaptors
 work without collecting results first.
 
 All stored intervals and query ranges use half-open `[start, stop)` semantics.
-`Lapper` keeps its intervals sorted by start and builds a fixed 32-interval
-block index that can skip regions proven not to overlap. Mixed blocks use NEON
-on AArch64, runtime-detected AVX2 on x86-64, and an exact scalar fallback
-elsewhere. The same algorithm handles both ordinary and pathological datasets
-with long intervals that engulf many shorter intervals.
+`Lapper` keeps its intervals sorted by start and indexes them in blocks of 32.
+A max tree over the blocks' end positions lets a query jump over any run of
+blocks that cannot overlap, in time logarithmic in the length of the run.
+Blocks that might overlap are checked 32 intervals at a time with NEON on
+AArch64, runtime-detected AVX2 on x86-64, and an exact scalar fallback
+elsewhere. The same algorithm handles both ordinary datasets and datasets with
+long intervals that engulf many shorter intervals.
 
 The `count()` method uses the
 [BITS algorithm](https://academic.oup.com/bioinformatics/article/29/1/1/273289)
 to count overlaps with two binary searches.
 
-## API and algorithm compatibility
+## Query backends
 
 The block index and SIMD backends are private implementation details: there is
-no mode flag, alternate query method, or architecture-specific API. Existing
-call patterns for `find()`, `seek()`, `count()`, `cov()`, `set_cov()`,
-`merge_overlaps()`, `depth()`, `union_and_intersect()`, `union()`, and
-`intersect()` retain their range semantics and return types. `count()` remains
-the independent BITS implementation; methods that use `find()` or `seek()`
-internally automatically share the exact indexed query path.
+no mode flag, alternate query method, or architecture-specific API. `find()`
+and `seek()` use the index directly, and `depth()`, `union_and_intersect()`,
+`union()`, and `intersect()` use it through them. `count()` is an independent
+BITS implementation.
 
 | Target | Mixed-block backend | Selection |
 |---|---|---|
@@ -57,8 +57,7 @@ Query coordinates must be `'static` so private dispatch code can use `TypeId`
 before reinterpreting primitive integer slices for SIMD. This includes every
 primitive integer and ordinary owned custom numeric type; it does not require a
 `Lapper` value to live for the entire program. Non-primitive `PrimInt` types use
-the scalar mask implementation. The bound is the API-breaking change that makes
-this a major release.
+the scalar mask implementation.
 
 ## Mutation
 
@@ -80,15 +79,21 @@ See `examples/serde.rs` for a brief example.
 
 ## Benchmarks
 
-The retained v2 release measurements, raw samples, compiler flags, and pinned
-competitor revisions live in
-[lapper_bakeoff](https://github.com/sstadick/lapper_bakeoff/tree/main/results/avx2-2026-07-28).
-On an AMD Ryzen 9 3950X with AVX2, the new implementation improved total time
-over rust-lapper 1.3.0 by 37.30%, 98.89%, and 34.64% on the three retained
-article cases. All implementations returned identical overlap counts.
+The table shows one index build and one query batch for the three overlap cases
+of the
+[September 2025 polars-bio benchmark](https://biodatageeks.org/polars-bio/blog/2025/09/05/interval-operations-benchmark--update-september-2025/),
+timed after the input is loaded. Each case builds one `Lapper<u32, ()>` per
+chromosome and sums `find(start, stop).count()` over every query interval.
 
-Benchmark results are workload- and hardware-specific; use the linked harness
-and raw data when making comparisons.
+| Case | Indexed intervals | Query intervals | Overlaps | Build | Query | Total |
+|---|---:|---:|---:|---:|---:|---:|
+| `1-2` | 438,694 | 198,621 | 54,246 | 5.8 ms | 4.6 ms | 10.4 ms |
+| `7-3` | 1,956,864 | 1,194,285 | 4,408,383 | 54.1 ms | 55.1 ms | 109.2 ms |
+| `8-7` | 1,194,285 | 9,944,559 | 307,184,634 | 57.2 ms | 690.5 ms | 747.7 ms |
+
+Times are medians on one core of an AMD Ryzen 9 3950X with AVX2, built with
+Rust 1.95, thin LTO, and `-C target-cpu=native`. Benchmark results are workload-
+and hardware-specific. `cargo bench` runs the crate's synthetic benchmarks.
 
 ## Example
 
@@ -228,6 +233,9 @@ fn main() {
 
 ## Release Notes
 
+- Unreleased: Skip runs of blocks that cannot overlap with a max tree. A skip
+  is logarithmic in its length for every data shape, including many short
+  intervals nested under a long one.
 - `2.0.0`: Promote `2.0.0-beta.1` to stable with no implementation changes.
   Includes the portable SIMD block index and signed-coordinate support.
   Requires Rust 1.59 or newer and the `I: 'static` coordinate bound.
