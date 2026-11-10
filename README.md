@@ -233,9 +233,10 @@ fn main() {
 
 ## Release Notes
 
-- Unreleased: Skip runs of blocks that cannot overlap with a max tree. A skip
+- `2.0.1`: Skip runs of blocks that cannot overlap with a max tree. A skip
   is logarithmic in its length for every data shape, including many short
-  intervals nested under a long one.
+  intervals nested under a long one. No public API changes; Rust 1.59 remains
+  the minimum supported version.
 - `2.0.0`: Promote `2.0.0-beta.1` to stable with no implementation changes.
   Includes the portable SIMD block index and signed-coordinate support.
   Requires Rust 1.59 or newer and the `I: 'static` coordinate bound.
