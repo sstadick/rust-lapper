@@ -1002,7 +1002,7 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let mut interval: &Interval<I, bool> = &self.merged.intervals[self.curr_pos];
+        let mut interval: &Interval<I, bool> = self.merged.intervals.get(self.curr_pos)?;
         if !self.initialized {
             self.curr_merged_pos = interval.start;
             self.initialized = true;
@@ -1552,6 +1552,12 @@ mod tests {
                    Interval{start: 0, stop: 5, val: 1},
                    Interval{start: 5, stop: 10, val: 2}
         ]);
+    }
+
+    #[test]
+    fn test_depth_empty() {
+        let lapper: Lapper<usize, u32> = Lapper::new(vec![]);
+        assert_eq!(lapper.depth().next(), None);
     }
 
     #[test]
